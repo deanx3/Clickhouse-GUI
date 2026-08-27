@@ -1,0 +1,187 @@
+/* ============================================================================
+   chgui design system
+   Three layers: primitives (raw values) -> semantic roles -> component aliases.
+   The --md-* names at the bottom are the original Material 3 role names, kept
+   so the access screens keep working while the palette underneath changed.
+   ========================================================================= */
+:root {
+  /* --- surfaces: a deep charcoal ladder, faintly blue so it reads cool ---- */
+  --bg-sunken: #080a0f;
+  --bg-base: #0b0e14;
+  --bg-panel: #10141c;
+  --bg-elevated: #161b26;
+  --bg-hover: #1c222e;
+  --bg-active: #232a38;
+  --bg-input: #0d1117;
+
+  --border-subtle: #1a202b;
+  --border: #252d3d;
+  --border-strong: #354057;
+
+  --text-primary: #e6eaf2;
+  --text-secondary: #99a3b8;
+  --text-tertiary: #6b7488;
+  --text-disabled: #4a5163;
+
+  /* --- one accent, carried over from the reference and from the ledger,
+         where orange already means "staged, not yet true" ------------------ */
+  --accent: #f0883e;
+  --accent-hover: #ff9d5c;
+  --accent-press: #d97528;
+  --accent-text: #ffb77c;
+  --accent-subtle: rgb(240 136 62 / 0.12);
+  --accent-border: rgb(240 136 62 / 0.35);
+
+  /* --- status. Amber sits far enough from the accent orange to read as a
+         different signal; nothing else in the UI is coloured. -------------- */
+  --success: #3fb950;
+  --success-subtle: rgb(63 185 80 / 0.14);
+  --error: #f85149;
+  --error-subtle: rgb(248 81 73 / 0.13);
+  --error-border: rgb(248 81 73 / 0.4);
+  --warning: #d29922;
+  --warning-subtle: rgb(210 153 34 / 0.13);
+  --info: #58a6ff;
+  --info-subtle: rgb(88 166 255 / 0.13);
+
+  /* --- spacing: a 4px grid ---------------------------------------------- */
+  --s1: 4px;  --s2: 8px;  --s3: 12px; --s4: 16px;
+  --s5: 20px; --s6: 24px; --s8: 32px; --s10: 40px;
+
+  /* --- radius: rounded, not soft ---------------------------------------- */
+  --r-xs: 4px; --r-sm: 6px; --r-md: 8px; --r-lg: 12px; --r-full: 999px;
+
+  /* --- elevation: minimal, dark UIs read depth from borders more than blur */
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.35);
+  --shadow: 0 4px 14px rgb(0 0 0 / 0.4);
+  --shadow-lg: 0 16px 40px rgb(0 0 0 / 0.5);
+
+  /* --- type ------------------------------------------------------------- */
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --fs-xs: 11px; --fs-sm: 12px; --fs-base: 13px; --fs-md: 14px;
+  --fs-lg: 16px; --fs-xl: 20px; --fs-2xl: 26px;
+
+  /* --- motion: fast enough that the tool never feels like it is thinking - */
+  --t-fast: 120ms;
+  --t: 180ms;
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* --- density ---------------------------------------------------------- */
+  --row-h: 32px;
+  --control-h: 30px;
+  --header-h: 48px;
+
+  /* --- Material 3 role names the access screens still reference ---------- */
+  --md-surface: var(--bg-base);
+  --md-surface-container-low: var(--bg-panel);
+  --md-surface-container: var(--bg-elevated);
+  --md-surface-container-high: var(--bg-hover);
+  --md-surface-container-highest: var(--bg-active);
+  --md-on-surface: var(--text-primary);
+  --md-on-surface-variant: var(--text-secondary);
+  --md-outline: var(--border-strong);
+  --md-outline-variant: var(--border);
+  --md-primary: var(--accent);
+  --md-on-primary: #2b1400;
+  --md-primary-container: #6b3a10;
+  --md-on-primary-container: var(--accent-hover);
+  --md-tertiary: var(--info);
+  --md-tertiary-container: rgb(88 166 255 / 0.18);
+  --md-error: var(--error);
+  --md-on-error: #40100c;
+  --md-error-container: var(--error-subtle);
+  --md-corner-xs: var(--r-xs);
+  --md-corner-sm: var(--r-sm);
+  --md-corner-md: var(--r-md);
+  --md-corner-lg: var(--r-lg);
+  --md-state-hover: 0.06;
+  --md-state-press: 0.1;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #app { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font: 400 var(--fs-base)/1.5 var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; }
+
+/* Identifiers are literal SQL tokens, so they are always monospace. */
+.ident { font-family: var(--font-mono); font-size: var(--fs-sm); }
+
+.num { font-variant-numeric: tabular-nums; }
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: var(--r-xs);
+}
+
+/* --- scrollbars: present but quiet ------------------------------------- */
+* { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border: 3px solid transparent;
+  border-radius: var(--r-full);
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover { background-clip: content-box; background-color: var(--text-tertiary); }
+
+/* --- tooltip: one CSS utility, no JS, no library ------------------------ */
+[data-tip] { position: relative; }
+
+[data-tip]::after {
+  content: attr(data-tip);
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  z-index: 60;
+  padding: 5px 8px;
+  background: var(--bg-active);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  box-shadow: var(--shadow);
+  color: var(--text-primary);
+  font: 400 var(--fs-xs)/1.3 var(--font-sans);
+  white-space: nowrap;
+  opacity: 0;
+  transform: translate(-50%, -3px);
+  pointer-events: none;
+  transition: opacity var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
+}
+
+[data-tip]:hover::after,
+[data-tip]:focus-visible::after { opacity: 1; transform: translate(-50%, 0); }
+[data-tip-left]::after { top: 50%; left: auto; right: calc(100% + 6px); transform: translate(3px, -50%); }
+[data-tip-left]:hover::after { transform: translate(0, -50%); }
+
+/* Keys rendered inline in tooltips and menus. */
+kbd {
+  padding: 1px 5px;
+  background: var(--bg-active);
+  border: 1px solid var(--border-strong);
+  border-bottom-width: 2px;
+  border-radius: var(--r-xs);
+  color: var(--text-secondary);
+  font: 500 10px/1.5 var(--font-sans);
+}
+
+@keyframes fade-in { from { opacity: 0 } to { opacity: 1 } }
+@keyframes rise { from { opacity: 0; transform: translateY(6px) } to { opacity: 1; transform: none } }
+@keyframes spin { to { transform: rotate(360deg) } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::after, *::before { animation-duration: 1ms !important; transition-duration: 1ms !important; }
+}

@@ -1,0 +1,18 @@
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:25.3
+    container_name: chgui-clickhouse
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    volumes:
+      - ./clickhouse/users.xml:/etc/clickhouse-server/users.d/gui.xml:ro
+      - ./clickhouse/init:/docker-entrypoint-initdb.d:ro
+      - ch-data:/var/lib/clickhouse
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+
+volumes:
+  ch-data:

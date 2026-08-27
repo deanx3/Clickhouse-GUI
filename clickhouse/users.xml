@@ -1,0 +1,16 @@
+<clickhouse>
+  <!-- Bootstrap admin only. Everything else is created as a SQL user by
+       init/01-seed.sql, because users defined here show up in system.users
+       with storage='users.xml' and CANNOT be altered by SQL - so the GUI
+       can read them but never manage them. -->
+  <users>
+    <admin>
+      <password>admin</password>
+      <networks><ip>::/0</ip></networks>
+      <profile>default</profile>
+      <quota>default</quota>
+      <access_management>1</access_management>
+      <named_collection_control>1</named_collection_control>
+    </admin>
+  </users>
+</clickhouse>

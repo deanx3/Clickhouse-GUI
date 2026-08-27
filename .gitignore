@@ -1,0 +1,17 @@
+# Build output
+/chgui
+/web/dist/*
+!/web/dist/.gitkeep
+/web/node_modules/
+
+# Local state: config holds the cookie secret, the db holds encrypted credentials
+*.db
+*.db-wal
+*.db-shm
+chgui.env
+*.log
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
