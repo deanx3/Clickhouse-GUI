@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/base64"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -85,5 +87,28 @@ func TestEvictionKeepsTheActiveConnectionAndDropsTheOldest(t *testing.T) {
 	}
 	if _, ok := s.Creds["a"]; ok {
 		t.Fatal("the oldest non-active connection survived")
+	}
+}
+
+func TestAutoCredSignsInCookielessRequestsOnly(t *testing.T) {
+	conns = []conn{{ID: "default", URL: "http://localhost:8123"}}
+	r := httptest.NewRequest("GET", "/api/me", nil)
+
+	if _, ok := session(r); ok {
+		t.Fatal("signed in without a cookie or autoCred")
+	}
+
+	autoCred = &cred{User: "admin", Pass: "admin"}
+	defer func() { autoCred = nil }()
+	s, ok := session(r)
+	if !ok || s.Active != "default" || s.Creds["default"].User != "admin" {
+		t.Fatalf("autoCred did not sign in: %+v", s)
+	}
+
+	// A real cookie still wins, so switching servers keeps working.
+	tok, _ := seal(sample())
+	r.AddCookie(&http.Cookie{Name: cookieName, Value: tok})
+	if s, _ := session(r); s.Active != "prod" {
+		t.Fatalf("cookie ignored in favour of autoCred: %+v", s)
 	}
 }

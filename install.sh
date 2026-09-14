@@ -1,7 +1,7 @@
 #!/bin/sh
 # Installs chgui for the current user - no root, nothing outside $HOME.
-#   ~/.local/bin/chgui            the server
-#   ~/.local/bin/chgui-app        launcher: starts the server, opens a window
+#   ~/.local/bin/chgui-desktop    the app: native window, server on loopback
+#   ~/.local/bin/chgui-app        launcher: loads the config, starts the app
 #   ~/.config/chgui/chgui.env     port, ClickHouse URL, cookie secret
 #   ~/.local/share/applications   desktop entry, so it shows in the app menu
 # Re-running is safe: the config file and its secret are never overwritten.
@@ -46,12 +46,16 @@ SRC="$(cd "$(dirname "$0")" && pwd)"
 mkdir -p "$BIN" "$CONF_DIR" "$APPS" "$ICONS"
 
 # --- build ------------------------------------------------------------------
-if [ ! -x "$SRC/chgui" ] || [ "$BUILD" = 1 ]; then
+if [ ! -x "$SRC/chgui-desktop" ] || [ "$BUILD" = 1 ]; then
+  if ! pkg-config --exists webkit2gtk-4.1 gtk+-3.0 2>/dev/null; then
+    echo "missing build libraries. Install them with:" >&2
+    echo "  sudo apt install libgtk-3-dev libwebkit2gtk-4.1-dev" >&2
+    exit 1
+  fi
   echo "building..."
-  npm --prefix "$SRC/web" run build >/dev/null
-  (cd "$SRC" && go build -ldflags="-s -w" -o chgui .)
+  make -C "$SRC" desktop >/dev/null
 fi
-install -m 755 "$SRC/chgui" "$BIN/chgui"
+install -m 755 "$SRC/chgui-desktop" "$BIN/chgui-desktop"
 
 # --- config: written once, so the secret survives upgrades ------------------
 CONF="$CONF_DIR/chgui.env"
@@ -67,6 +71,11 @@ CHGUI_CLICKHOUSE_URL=http://localhost:8123
 
 # Stable cookie key. Changing it signs everyone out. Keep it private.
 CHGUI_SECRET=$SECRET
+
+# ClickHouse account the app signs in as, so there is no login page.
+# Leave empty to be asked on the login page instead.
+CHGUI_USER=
+CHGUI_PASSWORD=
 
 # Pre-seed shared servers (inline JSON or a file path); users can add their own
 # from the header menu unless CHGUI_LOCK_CONNECTIONS=1.
@@ -84,6 +93,12 @@ elif [ -n "$PORT" ]; then
   echo "set   port $PORT in $CONF"
 else
   echo "kept  $CONF (existing port and secret preserved)"
+fi
+
+# Configs written before auto sign-in existed: add the keys so they are findable.
+if ! grep -q '^CHGUI_USER=' "$CONF"; then
+  printf '\n# ClickHouse account the app signs in as, so there is no login page.\nCHGUI_USER=\nCHGUI_PASSWORD=\n' >> "$CONF"
+  echo "added CHGUI_USER / CHGUI_PASSWORD to $CONF"
 fi
 
 LISTEN_PORT=$(sed -n 's|^CHGUI_ADDR=:\{0,1\}\(.*\)|\1|p' "$CONF" | tail -1)
@@ -112,9 +127,7 @@ EOF
 # --- launcher ---------------------------------------------------------------
 cat > "$BIN/chgui-app" <<'EOF'
 #!/bin/sh
-# Starts the chgui server if it is not already up, then opens it in a window.
-set -e
-
+# Loads the chgui config and opens the app window. Closing it stops the app.
 CONF="${XDG_CONFIG_HOME:-$HOME/.config}/chgui/chgui.env"
 LOG="${XDG_STATE_HOME:-$HOME/.local/state}/chgui.log"
 mkdir -p "$(dirname "$LOG")"
@@ -123,38 +136,7 @@ set -a
 [ -f "$CONF" ] && . "$CONF"
 set +a
 
-PORT="${CHGUI_ADDR##*:}"
-URL="http://localhost:${PORT:-8090}"
-
-ready() { curl -sf -o /dev/null "$URL/api/connections" 2>/dev/null; }
-
-if ! ready; then
-  echo "$(date -Is) starting chgui on $URL" >>"$LOG"
-  # setsid so the server outlives this launcher and the terminal that spawned it.
-  setsid "$(dirname "$0")/chgui" >>"$LOG" 2>&1 &
-
-  n=0
-  while [ "$n" -lt 100 ]; do
-    ready && break
-    sleep 0.1
-    n=$((n + 1))
-  done
-
-  if ! ready; then
-    echo "chgui did not come up. Last log lines:" >&2
-    tail -n 15 "$LOG" >&2
-    exit 1
-  fi
-fi
-
-# A Chromium-based browser in --app mode gives a real window with no browser
-# chrome. Otherwise fall back to whatever handles http.
-for b in brave-browser chromium chromium-browser google-chrome microsoft-edge; do
-  if command -v "$b" >/dev/null 2>&1; then
-    exec "$b" --app="$URL" --class=chgui
-  fi
-done
-exec xdg-open "$URL"
+exec "$(dirname "$0")/chgui-desktop" >>"$LOG" 2>&1
 EOF
 chmod 755 "$BIN/chgui-app"
 
@@ -170,7 +152,7 @@ Icon=chgui
 Terminal=false
 Categories=Development;Database;
 Keywords=clickhouse;sql;database;
-StartupWMClass=chgui
+StartupWMClass=chgui-desktop
 EOF
 
 command -v update-desktop-database >/dev/null && update-desktop-database "$APPS" 2>/dev/null || true
@@ -178,10 +160,8 @@ command -v gtk-update-icon-cache  >/dev/null && gtk-update-icon-cache -qtf "$DAT
 
 echo
 echo "installed:"
-echo "  $BIN/chgui"
+echo "  $BIN/chgui-desktop"
 echo "  $BIN/chgui-app"
 echo "  $APPS/chgui.desktop"
-echo
-echo "listening on: http://localhost:$LISTEN_PORT"
 echo
 echo 'Launch from your app menu ("ClickHouse Console"), or run: chgui-app'

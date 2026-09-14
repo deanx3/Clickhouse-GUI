@@ -39,12 +39,30 @@ Sign in as `analyst` to watch ClickHouse reject things the UI happily offers.
 
 ## Install as a desktop app
 
+A native Linux app: a GTK/WebKit window with the server running inside it, on
+`127.0.0.1` only. No browser needed, and closing the window quits the app.
+
 ```sh
-./install.sh --port 8090
+sudo apt install libgtk-3-dev libwebkit2gtk-4.1-dev   # build libraries, once
+./install.sh --build --port 8090
 ```
 
-Installs to `~/.local`, adds an app-menu entry, and opens in a Chromium app
-window. No root, nothing outside `$HOME`.
+Installs to `~/.local` and adds an app-menu entry ("ClickHouse Console"). No
+root beyond the libraries, nothing outside `$HOME`.
+
+To skip the login page, set your ClickHouse account in
+`~/.config/chgui/chgui.env` and reopen the app:
+
+```sh
+CHGUI_USER=admin
+CHGUI_PASSWORD=admin
+```
+
+The app checks them at startup and falls back to the login page if they fail.
+Logs go to `~/.local/state/chgui.log`. `make desktop` builds the app
+(`chgui-desktop`) without installing it.
+
+Known gap: CSV/JSON export may not save a file from inside the app window.
 
 ## Features
 
@@ -69,6 +87,7 @@ window. No root, nothing outside `$HOME`.
 | `CHGUI_DB`                | `$XDG_DATA_HOME/chgui/chgui.db`| Saved connections; `off` disables              |
 | `CHGUI_SECRET`            | random                         | 64 hex chars. Unset means restarts sign everyone out |
 | `CHGUI_SECURE_COOKIE`     | —                              | `1` when served over HTTPS                     |
+| `CHGUI_USER` / `CHGUI_PASSWORD` | —                        | Desktop app only: sign in automatically        |
 
 ```jsonc
 // CHGUI_CONNECTIONS
@@ -97,13 +116,18 @@ is Basic auth, so the password is only as protected as the transport.
 ## Development
 
 ```sh
-make api   # Go server
-make web   # Vite dev server on :5173, proxying /api
-make test  # Go + JS unit tests
+make api     # Go server
+make web     # Vite dev server on :5173, proxying /api
+make test    # Go + JS unit tests
+make desktop # native app build (-tags desktop, needs the GTK/WebKit libraries)
 ```
 
-Go server is stdlib only apart from the SQLite driver; the UI is Vue 3 talking
-to ClickHouse's HTTP interface via `FORMAT JSONCompact`.
+`pkgconfig/` aliases `webkit2gtk-4.0` to `4.1`: the webview library asks for
+4.0, and newer distros only ship 4.1.
+
+Go server is stdlib only apart from the SQLite driver, plus webview_go in the
+desktop build; the UI is Vue 3 talking to ClickHouse's HTTP interface via
+`FORMAT JSONCompact`.
 
 ## Licence
 

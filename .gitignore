@@ -1,5 +1,6 @@
 # Build output
 /chgui
+/chgui-desktop
 /web/dist/*
 !/web/dist/.gitkeep
 /web/node_modules/

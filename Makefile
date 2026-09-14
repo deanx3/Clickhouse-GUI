@@ -29,7 +29,11 @@ test:  ; go test ./... && npm --prefix web test
 ## build  - one binary with the UI embedded
 build: ; npm --prefix web run build && go build -ldflags="-s -w" -o chgui .
 
+## desktop- native window build (needs libgtk-3-dev libwebkit2gtk-4.1-dev)
+# pkgconfig/ aliases webkit2gtk-4.0 to 4.1, which is all newer distros ship.
+desktop: ; npm --prefix web run build && PKG_CONFIG_PATH=$(CURDIR)/pkgconfig go build -tags desktop -ldflags="-s -w" -o chgui-desktop .
+
 ## help   - list targets
 help:  ; @grep -E '^## ' $(MAKEFILE_LIST) | sed 's/^## /  make /'
 
-.PHONY: up down run api web test build help install
+.PHONY: up down run api web test build desktop help install

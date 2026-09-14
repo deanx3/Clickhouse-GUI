@@ -38,6 +38,10 @@ var (
 	conns    []conn
 	saves    *store
 
+	// desktop replaces the network server with a native window; set by the
+	// `desktop` build tag (desktop.go).
+	desktop func(http.Handler)
+
 	// One pooled client for every user and every server; credentials ride
 	// per-request, so connections are never tied to an identity.
 	chClient = &http.Client{Timeout: 60 * time.Second}
@@ -152,16 +156,23 @@ func chError(body []byte) string {
 	return strings.TrimSpace(string(body))
 }
 
+// autoCred, when set, signs every cookieless request in as that user. Only the
+// desktop build sets it, and only for a server bound to loopback.
+var autoCred *cred
+
 func session(r *http.Request) (sess, bool) {
-	ck, err := r.Cookie(cookieName)
-	if err != nil {
-		return sess{}, false
-	}
 	var s sess
-	if err := unseal(ck.Value, &s); err != nil || !s.valid() {
-		return sess{}, false
+	if ck, err := r.Cookie(cookieName); err == nil && unseal(ck.Value, &s) == nil && s.valid() {
+		return s, true
 	}
-	return s, true
+	if autoCred != nil {
+		return sess{
+			Active: conns[0].ID,
+			Creds:  map[string]cred{conns[0].ID: *autoCred},
+			Exp:    time.Now().Add(sessionTTL).Unix(),
+		}, true
+	}
+	return sess{}, false
 }
 
 // active resolves the connection and credentials the session is currently
@@ -617,6 +628,11 @@ func main() {
 	mux.HandleFunc("GET /api/me", handleMe)
 	mux.HandleFunc("POST /api/query", handleQuery)
 	mux.Handle("/", staticHandler())
+
+	if desktop != nil {
+		desktop(mux)
+		return
+	}
 
 	srv := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 
