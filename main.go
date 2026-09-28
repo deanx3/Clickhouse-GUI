@@ -45,6 +45,9 @@ var (
 	// One pooled client for every user and every server; credentials ride
 	// per-request, so connections are never tied to an identity.
 	chClient = &http.Client{Timeout: 60 * time.Second}
+
+	// The connect screen waits on this, so give up long before chClient would.
+	pingClient = &http.Client{Timeout: 4 * time.Second}
 )
 
 func env(k, def string) string {
@@ -69,9 +72,56 @@ type sess struct {
 	Active string          `json:"a"`
 	Creds  map[string]cred `json:"c"`
 	Exp    int64           `json:"e"`
+	// URL is the server typed on the desktop connect screen, held under the
+	// customID connection. It lives only in the session, like its password.
+	URL string `json:"u,omitempty"`
 }
 
-func (s sess) valid() bool { return s.Exp > time.Now().Unix() && len(s.Creds) > 0 }
+const customID = "custom"
+
+// customConn is the typed-in server as a connection, if there is one.
+func (s sess) customConn() (conn, bool) {
+	if s.URL == "" {
+		return conn{}, false
+	}
+	return conn{ID: customID, Name: hostOf(s.URL), URL: s.URL}, true
+}
+
+func hostOf(u string) string { return strings.TrimPrefix(strings.TrimPrefix(u, "https://"), "http://") }
+
+// remembers is whether sign-ins are saved as connections: the desktop app
+// only, where the one person at the keyboard owns the store.
+func remembers() bool { return desktop != nil && saves != nil && !lockConn }
+
+// useSaved makes a saved connection active after proving it still works.
+func useSaved(w http.ResponseWriter, r *http.Request, id string) {
+	c, err := saves.get(id)
+	if errors.Is(err, errNoSuchConn) {
+		writeErr(w, http.StatusBadRequest, "unknown connection")
+		return
+	}
+	if err != nil {
+		writeErr(w, http.StatusConflict, err.Error())
+		return
+	}
+	if _, err := query(conn{ID: c.ID, Name: c.Name, URL: c.URL}, cred{User: c.User, Pass: c.Pass}, "SELECT 1", nil); err != nil {
+		writeErr(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+	s, _ := session(r)
+	s.Active = c.ID
+	s.Exp = time.Now().Add(sessionTTL).Unix()
+	if err := setSession(w, s); err != nil {
+		writeErr(w, http.StatusInternalServerError, "could not start session")
+		return
+	}
+	writeJSON(w, map[string]any{"user": c.User, "connection": c.ID})
+}
+
+// A saved connection carries its own credentials, so being on one is enough.
+func (s sess) valid() bool {
+	return s.Exp > time.Now().Unix() && (len(s.Creds) > 0 || strings.HasPrefix(s.Active, savedPrefix))
+}
 
 // query runs sql over the ClickHouse HTTP interface as c. JSONCompact returns
 // rows as arrays rather than repeating every column name on every row, which
@@ -188,6 +238,10 @@ func active(s sess) (conn, cred, bool) {
 	if !ok {
 		return conn{}, cred{}, false
 	}
+	if s.Active == customID {
+		target, ok := s.customConn()
+		return target, c, ok
+	}
 	target, ok := findConn(conns, s.Active)
 	return target, c, ok
 }
@@ -234,6 +288,12 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, row)
 	}
+	if c, ok := s.customConn(); ok && signedIn {
+		out = append(out, map[string]any{
+			"id": c.ID, "name": c.Name, "url": c.URL, "saved": false,
+			"signedIn": true, "user": s.Creds[c.ID].User,
+		})
+	}
 	// Saved connections carry their own credentials, so they are usable by
 	// anyone who can reach this server - which is exactly what "shared" means
 	// and what the UI has to say out loud.
@@ -262,6 +322,7 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
 func handleLogin(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Connection string `json:"connection"`
+		URL        string `json:"url"`
 		User       string `json:"user"`
 		Password   string `json:"password"`
 	}
@@ -272,11 +333,39 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 	if in.Connection == "" {
 		in.Connection = conns[0].ID
 	}
+	// The desktop connect screen lists saved connections; picking one needs no
+	// password, as it would not from the header menu either.
+	if strings.HasPrefix(in.Connection, savedPrefix) && remembers() {
+		useSaved(w, r, in.Connection)
+		return
+	}
 
 	target, ok := findConn(conns, in.Connection)
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "unknown connection")
 		return
+	}
+	// Only the desktop app takes a typed server: it listens on loopback for one
+	// person. A network deployment would let anonymous visitors aim it anywhere.
+	custom := ""
+	if in.URL != "" {
+		if desktop == nil || lockConn {
+			writeErr(w, http.StatusForbidden, "this deployment only connects to its configured servers")
+			return
+		}
+		clean, err := normalizeURL(in.URL)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if err := checkTarget(clean); err != nil {
+			writeErr(w, http.StatusForbidden, err.Error())
+			return
+		}
+		if clean != target.URL {
+			custom = clean
+			target, _ = sess{URL: clean}.customConn()
+		}
 	}
 
 	c := cred{User: in.User, Pass: in.Password, At: time.Now().Unix()}
@@ -291,7 +380,28 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 	if s.Creds == nil {
 		s.Creds = map[string]cred{}
 	}
+
+	// The desktop app remembers every server it connects to. Saving is a
+	// convenience: if it fails, this sign-in still stands for the session.
+	if remembers() {
+		kept, err := saves.save(saved{Name: hostOf(target.URL), URL: target.URL, User: c.User, Pass: c.Pass, CreatedBy: c.User})
+		if err == nil {
+			s.Active = kept.ID
+			s.Exp = time.Now().Add(sessionTTL).Unix()
+			if err := setSession(w, s); err != nil {
+				writeErr(w, http.StatusInternalServerError, "could not start session")
+				return
+			}
+			writeJSON(w, map[string]any{"user": c.User, "connection": kept.ID})
+			return
+		}
+		log.Printf("could not save the connection to %s: %v", target.URL, err)
+	}
+
 	s.Creds[target.ID] = c
+	if custom != "" {
+		s.URL = custom
+	}
 	s.Active = target.ID
 	s.Exp = time.Now().Add(sessionTTL).Unix()
 	evictOldest(&s)
@@ -535,6 +645,39 @@ func handleMe(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handlePing tells the connect screen whether a server is up, before anyone
+// has credentials. ClickHouse's /ping needs none. Only the desktop build shows
+// the address or checks a typed one (?url=): a network deployment keeps its
+// servers from anonymous visitors, as /api/connections does.
+func handlePing(w http.ResponseWriter, r *http.Request) {
+	target := conns[0]
+	if raw := r.URL.Query().Get("url"); raw != "" && desktop != nil {
+		clean, err := normalizeURL(raw)
+		if err == nil {
+			err = checkTarget(clean)
+		}
+		if err != nil {
+			writeJSON(w, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+		target, _ = sess{URL: clean}.customConn()
+	}
+	out := map[string]any{"name": target.Name, "ok": true}
+	if desktop != nil {
+		out["url"] = target.URL
+	}
+	resp, err := pingClient.Get(target.URL + "/ping")
+	if err != nil {
+		out["ok"], out["error"] = false, reachErr(target, err).Error()
+	} else {
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			out["ok"], out["error"] = false, fmt.Sprintf("%s answered %s. Is that a ClickHouse HTTP port?", target.Name, resp.Status)
+		}
+	}
+	writeJSON(w, out)
+}
+
 // handleQuery is deliberately an open SQL passthrough. It is safe to expose
 // because the statement runs as the signed-in ClickHouse user: this endpoint
 // can do nothing the same person could not do from clickhouse-client.
@@ -626,6 +769,7 @@ func main() {
 	mux.HandleFunc("POST /api/switch", handleSwitch)
 	mux.HandleFunc("POST /api/logout", handleLogout)
 	mux.HandleFunc("GET /api/me", handleMe)
+	mux.HandleFunc("GET /api/ping", handlePing)
 	mux.HandleFunc("POST /api/query", handleQuery)
 	mux.Handle("/", staticHandler())
 

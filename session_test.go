@@ -112,3 +112,44 @@ func TestAutoCredSignsInCookielessRequestsOnly(t *testing.T) {
 		t.Fatalf("cookie ignored in favour of autoCred: %+v", s)
 	}
 }
+
+func TestTypedServerIsDesktopOnlyAndBecomesTheActiveConnection(t *testing.T) {
+	ch := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"data":[[1]]}`))
+	}))
+	defer ch.Close()
+
+	oldConns, oldDesktop := conns, desktop
+	defer func() { conns, desktop = oldConns, oldDesktop }()
+	conns = []conn{{ID: "default", Name: "ClickHouse", URL: "http://127.0.0.1:1"}}
+
+	login := func() *httptest.ResponseRecorder {
+		body := `{"user":"admin","password":"pw","url":"` + ch.URL + `"}`
+		w := httptest.NewRecorder()
+		handleLogin(w, httptest.NewRequest("POST", "/api/login", strings.NewReader(body)))
+		return w
+	}
+
+	desktop = nil
+	if w := login(); w.Code != http.StatusForbidden {
+		t.Fatalf("network build accepted a typed server: %d %s", w.Code, w.Body)
+	}
+
+	desktop = func(http.Handler) {}
+	w := login()
+	if w.Code != http.StatusOK {
+		t.Fatalf("desktop login: %d %s", w.Code, w.Body)
+	}
+	r := httptest.NewRequest("GET", "/api/me", nil)
+	for _, c := range w.Result().Cookies() {
+		r.AddCookie(c)
+	}
+	s, ok := session(r)
+	if !ok {
+		t.Fatal("no session after login")
+	}
+	target, c, ok := active(s)
+	if !ok || target.URL != ch.URL || c.User != "admin" {
+		t.Fatalf("active = %+v %+v %v, want %s as admin", target, c, ok, ch.URL)
+	}
+}

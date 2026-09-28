@@ -164,6 +164,29 @@ func (s *store) add(c saved) (saved, error) {
 	return c, nil
 }
 
+// save is add for the desktop connect screen: connecting again to the same
+// server as the same user keeps the row and refreshes its password.
+func (s *store) save(c saved) (saved, error) {
+	var id string
+	err := s.db.QueryRow(`SELECT id FROM connections WHERE url = ? AND ch_user = ?`, c.URL, c.User).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return s.add(c)
+	}
+	if err != nil {
+		return saved{}, err
+	}
+	blob, err := sealBytes(storeAEAD, []byte(c.Pass))
+	if err != nil {
+		return saved{}, err
+	}
+	if _, err := s.db.Exec(`UPDATE connections SET secret = ? WHERE id = ?`, blob, id); err != nil {
+		return saved{}, err
+	}
+	c, err = s.get(id)
+	c.Pass = ""
+	return c, err
+}
+
 func (s *store) remove(id string) error {
 	res, err := s.db.Exec(`DELETE FROM connections WHERE id = ?`, id)
 	if err != nil {

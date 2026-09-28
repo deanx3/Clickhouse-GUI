@@ -137,3 +137,24 @@ func TestCookieAndStoreKeysAreDistinct(t *testing.T) {
 		t.Fatal("the cookie key can decrypt the connection store")
 	}
 }
+
+func TestSaveKeepsOneRowPerServerAndUserAndRefreshesThePassword(t *testing.T) {
+	s := testStore(t)
+	first, err := s.save(saved{Name: "ch:8123", URL: "http://ch:8123", User: "admin", Pass: "old"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := s.save(saved{Name: "ch:8123", URL: "http://ch:8123", User: "admin", Pass: "new"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.ID != first.ID {
+		t.Fatalf("second save made a new row: %s vs %s", again.ID, first.ID)
+	}
+	if list, _ := s.list(); len(list) != 1 {
+		t.Fatalf("%d rows, want 1", len(list))
+	}
+	if got, _ := s.get(first.ID); got.Pass != "new" {
+		t.Fatalf("password = %q, want the new one", got.Pass)
+	}
+}

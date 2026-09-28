@@ -1,10 +1,11 @@
 <script setup>
-import { computed, nextTick, ref } from 'vue'
-import { User, Lock, ArrowRight, AlertCircle } from 'lucide-vue-next'
-import { login, me } from './api'
+import { computed, nextTick, onMounted, ref } from 'vue'
+import { User, Lock, ArrowRight, AlertCircle, Server, RotateCw, ChevronRight } from 'lucide-vue-next'
+import { connections, login, me, ping } from './api'
 import Btn from './ui/Btn.vue'
 import Field from './ui/Field.vue'
 import Logo from './ui/Logo.vue'
+import { parseTarget, buildURL, DEFAULT_PORT } from './target'
 
 const emit = defineEmits(['signed-in'])
 
@@ -14,18 +15,74 @@ const error = ref('')
 const busy = ref(false)
 const userField = ref(null)
 
+// null while checking, then { name, url?, ok, error? } from /api/ping. Only
+// the desktop app sends url, and only then can the server be edited.
+const server = ref(null)
+const checking = ref(false)
+const editable = ref(false)
+const target = ref({ scheme: 'http', host: '', port: DEFAULT_PORT })
+const LAST = 'chgui.server'
+// Servers the desktop app connected to before; one click reconnects.
+const recent = ref([])
+const opening = ref('')
+
+const url = computed(() => (editable.value && target.value.host.trim() ? buildURL(target.value) : undefined))
 const canSubmit = computed(() => user.value.trim().length > 0 && !busy.value)
+
+async function check() {
+  checking.value = true
+  server.value = await ping(url.value)
+  checking.value = false
+}
+
+// Pasting "https://host:9440" into Host fills the other fields instead of
+// producing a host that is silently wrong.
+function splitHost() {
+  const parsed = parseTarget(target.value.host, target.value.port)
+  if (parsed) target.value = parsed
+  check()
+}
+
+onMounted(async () => {
+  await check()
+  if (!server.value.url) return
+  let last = ''
+  try { last = localStorage.getItem(LAST) || '' } catch {}
+  // A saved URL without a port means the scheme's default, not ClickHouse's.
+  const saved = last || server.value.url
+  target.value = parseTarget(saved, saved.startsWith('https:') ? '443' : '80')
+  editable.value = true
+  recent.value = (await connections()).connections.filter((c) => c.saved && !c.broken)
+  if (last && last !== server.value.url) await check()
+})
+
+async function reopen(row) {
+  if (opening.value) return
+  opening.value = row.id
+  error.value = ''
+  try {
+    await login('', '', row.id)
+    emit('signed-in', await me())
+  } catch (e) {
+    error.value = e.message
+  } finally {
+    opening.value = ''
+  }
+}
 
 async function submit() {
   if (!canSubmit.value) return
   busy.value = true
   error.value = ''
   try {
-    await login(user.value.trim(), password.value)
+    await login(user.value.trim(), password.value, undefined, url.value)
+    if (url.value) try { localStorage.setItem(LAST, url.value) } catch {}
     emit('signed-in', await me())
   } catch (e) {
     error.value = e.message
     password.value = ''
+    // A failure may mean the server went away; refresh the banner to match.
+    check()
     await nextTick()
     userField.value?.focus()
   } finally {
@@ -42,9 +99,74 @@ async function submit() {
     <section class="panel">
       <header class="brand">
         <span class="mark"><Logo :size="26" /></span>
-        <h1>ClickHouse Console</h1>
-        <p>Explore schemas, run SQL, and manage access.</p>
+        <h1>Connect to ClickHouse</h1>
+        <p>Use a ClickHouse user. There is no separate app account.</p>
       </header>
+
+      <section v-if="recent.length" class="recent" aria-label="Saved connections">
+        <span class="lbl">Saved connections</span>
+        <button
+          v-for="row in recent"
+          :key="row.id"
+          type="button"
+          class="conn"
+          :disabled="!!opening"
+          @click="reopen(row)"
+        >
+          <Server :size="14" class="ico" />
+          <span class="who">
+            <span class="name">{{ row.name }}</span>
+            <span class="meta">{{ row.user }} · {{ row.url }}</span>
+          </span>
+          <RotateCw v-if="opening === row.id" :size="14" class="spin" />
+          <ChevronRight v-else :size="14" class="go-ico" />
+        </button>
+        <span class="or">or connect to a server</span>
+      </section>
+
+      <div v-if="editable" class="hostrow">
+        <label class="scheme">
+          <span class="lbl">Scheme</span>
+          <select v-model="target.scheme" @change="check">
+            <option value="http">http</option>
+            <option value="https">https</option>
+          </select>
+        </label>
+        <!-- Field puts class on its input, so size the wrappers instead. -->
+        <div class="host">
+          <Field v-model="target.host" label="Host" placeholder="clickhouse.internal"
+                 mono :invalid="server && !server.ok" @blur="splitHost" @keydown.enter.prevent="splitHost">
+            <template #icon><Server :size="15" /></template>
+          </Field>
+        </div>
+        <div class="port">
+          <Field v-model="target.port" label="Port" :placeholder="DEFAULT_PORT"
+                 mono inputmode="numeric" @change="check" />
+        </div>
+      </div>
+
+      <div v-else :class="['server', { down: server && !server.ok }]">
+        <Server :size="15" class="ico" />
+        <span class="where">
+          <span class="lbl">Server</span>
+          <span class="addr">{{ server ? server.name : 'Checking…' }}</span>
+        </span>
+      </div>
+
+      <p v-if="server" :class="['state', { down: !server.ok }]">
+        <span class="dot" />{{ checking ? 'Checking…' : server.ok ? 'Reachable' : 'Unreachable' }}
+      </p>
+
+      <Transition name="err">
+        <div v-if="server && !server.ok && !error" class="error down-msg" role="alert">
+          <AlertCircle :size="15" />
+          <span>{{ server.error }}</span>
+          <Btn type="button" size="sm" class="retry" :loading="checking" @click="check">
+            <template #icon><RotateCw :size="13" /></template>
+            Retry
+          </Btn>
+        </div>
+      </Transition>
 
       <form novalidate @submit.prevent="submit">
         <Field
@@ -84,7 +206,7 @@ async function submit() {
         </Transition>
 
         <Btn type="submit" variant="primary" class="go" :loading="busy" :disabled="!canSubmit">
-          {{ busy ? 'Signing in' : 'Sign in' }}
+          {{ busy ? 'Connecting' : 'Connect' }}
           <template #after>
             <ArrowRight v-if="!busy" :size="15" />
           </template>
@@ -92,7 +214,7 @@ async function submit() {
       </form>
 
       <footer>
-        Statements run as you. ClickHouse decides what you may see and change.
+        Statements run as this user. ClickHouse decides what you may see and change.
       </footer>
     </section>
 
@@ -169,6 +291,102 @@ h1 { margin: 0; font-size: var(--fs-xl); font-weight: 600; letter-spacing: -0.02
   color: var(--text-secondary);
   font-size: var(--fs-base);
 }
+
+.server {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+}
+
+.server .ico { flex: none; color: var(--text-tertiary); }
+.where { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.where .lbl { color: var(--text-tertiary); font-size: var(--fs-xs); }
+.addr {
+  overflow: hidden;
+  font: 500 var(--fs-sm)/1.4 var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent { display: flex; flex-direction: column; gap: 6px; margin-bottom: var(--s5); }
+.recent .lbl { color: var(--text-secondary); font-size: var(--fs-sm); font-weight: 500; }
+.conn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 11px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+.conn:hover:not(:disabled) { border-color: var(--accent-border); }
+.conn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.conn:disabled { cursor: default; opacity: 0.7; }
+.conn .ico, .conn .go-ico { flex: none; color: var(--text-tertiary); }
+.who { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.who .name { font-size: var(--fs-sm); font-weight: 500; }
+.who .meta {
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font: 400 var(--fs-xs)/1.4 var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.spin { animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.or {
+  margin-top: var(--s2);
+  color: var(--text-tertiary);
+  font-size: var(--fs-xs);
+  text-align: center;
+}
+
+.hostrow { display: flex; gap: 6px; align-items: flex-end; }
+.hostrow .host { flex: 1; min-width: 0; }
+.hostrow .port { width: 78px; flex: none; }
+.scheme { width: 78px; flex: none; }
+.scheme .lbl {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+.scheme select {
+  width: 100%;
+  height: 38px;
+  padding: 0 6px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text-primary);
+  font-size: var(--fs-sm);
+}
+
+.state {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 var(--s4);
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+}
+
+.dot { width: 7px; height: 7px; border-radius: var(--r-full); background: var(--success); }
+.down .dot { background: var(--error); }
+.down { border-color: var(--error-border); }
+
+
+.error.down-msg { align-items: center; margin: 0 0 var(--s5); }
+.down-msg span { flex: 1; }
+.retry { flex: none; }
 
 .pw { margin-top: var(--s4); }
 .go { width: 100%; height: 38px; margin-top: var(--s5); font-size: var(--fs-md); }

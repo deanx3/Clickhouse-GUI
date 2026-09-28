@@ -28,8 +28,9 @@ async function post(path, body) {
   return data
 }
 
-export const login = (user, password, connection) =>
-  post('/api/login', { user, password, connection })
+// url: a typed server, desktop app only.
+export const login = (user, password, connection, url) =>
+  post('/api/login', { user, password, connection, url })
 
 export const logout = (connection) => post('/api/logout', { connection })
 export const switchTo = (connection) => post('/api/switch', { connection })
@@ -41,6 +42,16 @@ export async function connections() {
   return res.ok ? res.json() : { connections: [], active: '' }
 }
 export const query = (sql, params) => post('/api/query', { sql, params })
+
+// Whether a server (default: the configured one) is reachable; needs no sign-in.
+export async function ping(url) {
+  try {
+    const res = await fetch(url ? `/api/ping?url=${encodeURIComponent(url)}` : '/api/ping')
+    return res.ok ? res.json() : { ok: false, error: `Request failed (${res.status})` }
+  } catch {
+    return { ok: false, error: 'Cannot reach the chgui server.' }
+  }
+}
 
 export async function me() {
   const res = await fetch('/api/me')
