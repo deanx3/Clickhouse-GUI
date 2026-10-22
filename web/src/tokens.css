@@ -113,6 +113,9 @@ body {
 }
 
 button, input, select, textarea { font: inherit; color: inherit; }
+/* WebKitGTK draws the option list with the GTK theme (light) unless told otherwise. */
+:root { color-scheme: dark; }
+option { background: var(--bg-elevated); color: var(--text-primary); }
 button { cursor: pointer; }
 button:disabled { cursor: not-allowed; }
 
