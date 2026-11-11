@@ -18,3 +18,8 @@ export const previewSQL = (db, table, limit, offset = 0) => {
 
 export const literal = (s) =>
   `'${String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`
+
+// A proxy in front of ClickHouse answers with an HTML error page. Show its
+// title ("502 Bad Gateway"), not the markup.
+export const plain = (msg) =>
+  /^\s*</.test(msg) ? (msg.match(/<title>([^<]*)<\/title>/i)?.[1] || 'The server sent an HTML error page.') : msg

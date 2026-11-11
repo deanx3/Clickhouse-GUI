@@ -26,7 +26,7 @@ const groups = computed(() => {
   <aside class="history">
     <header>
       <span class="ttl">Query history</span>
-      <Btn v-if="history.length" size="sm" variant="ghost" data-tip="Clear all"
+      <Btn v-if="history.length" size="sm" icon variant="ghost" data-tip="Clear all"
            @click="clearHistory()">
         <template #icon><Trash2 :size="13" /></template>
       </Btn>
@@ -35,7 +35,7 @@ const groups = computed(() => {
       </Btn>
     </header>
 
-    <div class="search">
+    <div class="searchbox">
       <Search :size="13" />
       <input v-model="filter" placeholder="Search history" aria-label="Search history"
              spellcheck="false" @keydown.esc="filter = ''" />
@@ -61,9 +61,9 @@ const groups = computed(() => {
               <span class="spacer" />
               <span class="clock num">{{ clockOf(e.at) }}</span>
               <div class="acts">
-                <button data-tip="Run" @click="emit('use', e.sql, true)"><Play :size="12" /></button>
-                <button data-tip="Copy" @click="copy(e.sql, 'Query copied')"><Copy :size="12" /></button>
-                <button data-tip="Remove" @click="forget(e.id)"><Trash2 :size="12" /></button>
+                <button data-tip="Run" aria-label="Run" @click="emit('use', e.sql, true)"><Play :size="12" /></button>
+                <button data-tip="Copy" aria-label="Copy" @click="copy(e.sql, 'Query copied')"><Copy :size="12" /></button>
+                <button data-tip-left data-tip="Remove" aria-label="Remove" @click="forget(e.id)"><Trash2 :size="12" /></button>
               </div>
             </footer>
           </article>
@@ -87,33 +87,18 @@ header {
   display: flex;
   align-items: center;
   gap: 2px;
-  height: var(--header-h);
-  padding: 0 var(--s2) 0 var(--s4);
+  height: 40px;
+  flex: none;
+  padding: 0 var(--s2) 0 var(--s3);
   border-bottom: 1px solid var(--border-subtle);
 }
 
 .ttl { flex: 1; font-size: var(--fs-sm); font-weight: 600; }
 
-.search {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  margin: var(--s2);
-  padding: 0 9px;
-  height: 28px;
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  color: var(--text-tertiary);
-}
+.searchbox { flex: none; margin: var(--s2); }
 
-.search:focus-within { border-color: var(--accent); }
-.search input {
-  flex: 1; min-width: 0; background: none; border: 0; outline: none;
-  color: var(--text-primary); font-size: var(--fs-sm);
-}
-
-.body { flex: 1; overflow: auto; padding: 0 var(--s2) var(--s5); }
+/* x hidden: the hidden tooltips on the row actions otherwise widen the scroll area. */
+.body { flex: 1; overflow: hidden auto; padding: 0 var(--s2) var(--s5); }
 
 h4 {
   position: sticky;

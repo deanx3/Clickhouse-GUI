@@ -36,7 +36,7 @@ const qualified = computed(() => `${props.db}.${props.table}`)
           <template #icon><Play :size="13" /></template>Browse data
         </Btn>
         <Btn size="sm" @click="emit('generate', db, table)">Generate SELECT</Btn>
-        <Btn size="sm" icon data-tip="Copy qualified name" @click="copy(qualified, 'Name copied')">
+        <Btn size="sm" icon data-tip-left data-tip="Copy qualified name" aria-label="Copy qualified name" @click="copy(qualified, 'Name copied')">
           <template #icon><Copy :size="13" /></template>
         </Btn>
       </div>

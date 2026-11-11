@@ -127,7 +127,15 @@ func (s sess) valid() bool {
 // rows as arrays rather than repeating every column name on every row, which
 // roughly halves the payload on the wide result sets this app lives on.
 func query(target conn, c cred, sql string, params map[string]string) ([]byte, error) {
+	return queryWith(target, c, sql, params, nil)
+}
+
+// queryWith is query plus ClickHouse settings for that one statement.
+func queryWith(target conn, c cred, sql string, params map[string]string, settings url.Values) ([]byte, error) {
 	q := url.Values{"default_format": {"JSONCompact"}}
+	for k, v := range settings {
+		q[k] = v
+	}
 	for k, v := range params {
 		// ClickHouse binds {name:Type} placeholders from param_<name>. Only
 		// values, never identifiers - those are quoted client-side.
@@ -642,6 +650,7 @@ func handleMe(w http.ResponseWriter, r *http.Request) {
 		"user":       c.User,
 		"clickhouse": target.URL,
 		"connection": map[string]string{"id": target.ID, "name": target.Name, "url": target.URL},
+		"assistant":  aiOn(),
 	})
 }
 
@@ -771,6 +780,7 @@ func main() {
 	mux.HandleFunc("GET /api/me", handleMe)
 	mux.HandleFunc("GET /api/ping", handlePing)
 	mux.HandleFunc("POST /api/query", handleQuery)
+	mux.HandleFunc("POST /api/agent", handleAgent)
 	mux.Handle("/", staticHandler())
 
 	if desktop != nil {

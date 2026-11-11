@@ -4,6 +4,8 @@ import {
   PRIVILEGES, resolve, scopeId, scopeLabel, sourceLabel, grantSQL, revokeSQL,
 } from './rbac'
 import { stage, isStaged } from './ledger'
+import { Plus } from 'lucide-vue-next'
+import Btn from './ui/Btn.vue'
 
 const props = defineProps({
   grantee: String,
@@ -53,6 +55,18 @@ const partial = computed(() => {
 const cell = (priv, [db, table]) =>
   resolve(props.grantee, priv, db, table, props.grants, props.roles)
 
+// Everything the template needs to draw one checkbox, worked out once.
+function view(priv, scope) {
+  const state = cell(priv, scope)
+  const direct = !!state?.direct
+  const sql = (direct ? revokeSQL : grantSQL)(priv, scope[0], scope[1], props.grantee)
+  return {
+    direct,
+    cls: { direct, inherited: !!state && !direct, pending: isStaged(sql) },
+    tip: sourceLabel(state) || (state ? 'granted directly' : 'not granted'),
+  }
+}
+
 function toggle(priv, [db, table]) {
   if (props.readonly) return
   const state = cell(priv, [db, table])
@@ -70,162 +84,164 @@ function addScope() {
 
 <template>
   <div class="grants">
-    <table>
-      <thead>
-        <tr>
-          <th class="scope">Scope</th>
-          <th v-for="p in PRIVILEGES" :key="p">{{ p }}</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="scope in scopes" :key="scopeId(...scope)">
-          <th class="scope ident">
-            {{ scopeLabel(...scope) }}
-            <span v-if="partial.has(scopeId(...scope))" class="flag"
-                  title="This scope has partial revokes, which this matrix does not show">
-              partial revoke
-            </span>
-          </th>
-          <td v-for="p in PRIVILEGES" :key="p">
-            <button
-              :class="[
-                'mark',
-                { direct: cell(p, scope)?.direct,
-                  inherited: cell(p, scope) && !cell(p, scope).direct,
-                  pending: isStaged(cell(p, scope)?.direct
-                    ? revokeSQL(p, scope[0], scope[1], grantee)
-                    : grantSQL(p, scope[0], scope[1], grantee)) }
-              ]"
-              :disabled="readonly"
-              :title="sourceLabel(cell(p, scope)) || (cell(p, scope) ? 'granted directly' : 'not granted')"
-              @click="toggle(p, scope)"
-            />
-          </td>
-        </tr>
-      </tbody>
-    </table>
-
-    <div v-if="!readonly" class="add">
-      <select v-model="pickDb">
-        <option value="">Add scope&hellip;</option>
-        <option v-for="db in databases" :key="db" :value="db">{{ db }}</option>
-      </select>
-      <select v-model="pickTable" :disabled="!pickDb">
-        <option value="*">* (whole database)</option>
-        <option v-for="t in tablesIn" :key="t" :value="t">{{ t }}</option>
-      </select>
-      <button :disabled="!pickDb" @click="addScope">Add</button>
+    <div class="scroller">
+      <table>
+        <thead>
+          <tr>
+            <th class="scope">Scope</th>
+            <th v-for="p in PRIVILEGES" :key="p">{{ p }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="scope in scopes" :key="scopeId(...scope)">
+            <th class="scope ident">
+              {{ scopeLabel(...scope) }}
+              <span v-if="partial.has(scopeId(...scope))" class="flag"
+                    title="This scope has partial revokes, which this matrix does not show">
+                partial revoke
+              </span>
+            </th>
+            <td v-for="p in PRIVILEGES" :key="p">
+              <!-- One-item v-for: a local name for view(), so it runs once per cell. -->
+              <button v-for="v in [view(p, scope)]" :key="p" class="cell"
+                      :disabled="readonly" :aria-pressed="v.direct" :title="v.tip"
+                      :aria-label="`${p} on ${scopeLabel(...scope)}: ${v.tip}`"
+                      @click="toggle(p, scope)">
+                <span :class="['mark', v.cls]" />
+              </button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
     </div>
 
-    <p class="key">
-      <span class="mark direct" /> direct
-      <span class="mark inherited" /> inherited
-      <span class="mark pending" /> staged
-      <span class="mark" /> none
-    </p>
+    <div class="foot">
+      <div v-if="!readonly" class="add">
+        <select v-model="pickDb" class="select sm" aria-label="Database">
+          <option value="">Add scope&hellip;</option>
+          <option v-for="db in databases" :key="db" :value="db">{{ db }}</option>
+        </select>
+        <select v-model="pickTable" class="select sm" :disabled="!pickDb" aria-label="Table">
+          <option value="*">* (whole database)</option>
+          <option v-for="t in tablesIn" :key="t" :value="t">{{ t }}</option>
+        </select>
+        <Btn size="sm" :disabled="!pickDb" @click="addScope">
+          <template #icon><Plus :size="13" /></template>Add
+        </Btn>
+      </div>
+
+      <p class="key">
+        <span class="mark direct" /> direct
+        <span class="mark inherited" /> inherited
+        <span class="mark pending" /> staged
+        <span class="mark" /> none
+      </p>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.grants { overflow: auto; }
+.grants { border: 1px solid var(--border-subtle); border-radius: var(--r-md); overflow: hidden; }
+.scroller { overflow: auto; }
 
-table { border-collapse: collapse; }
+table { border-collapse: collapse; min-width: 100%; }
 
 thead th {
-  height: 30px;
+  height: 34px;
   padding: 0 6px;
-  border-bottom: 1px solid var(--md-outline);
-  color: var(--md-on-surface-variant);
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-tertiary);
   font: 500 10px/1 var(--font-sans);
   letter-spacing: 0.04em;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
+/* The scope stays put while a wide privilege list scrolls under it. */
 th.scope {
-  padding-right: 20px;
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  padding: 0 var(--s5) 0 var(--s4);
   text-align: left;
-  text-transform: none;
-  letter-spacing: 0;
   white-space: nowrap;
 }
 
 tbody th.scope {
   height: var(--row-h);
-  border-bottom: 1px solid var(--md-outline-variant);
-  color: var(--md-on-surface);
-  font: 400 12.5px/1 var(--font-mono);
+  background: var(--bg-base);
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  font: 400 var(--fs-sm)/1 var(--font-mono);
 }
+
+td { padding: 0; border-bottom: 1px solid var(--border-subtle); text-align: center; }
+tbody tr:last-child > * { border-bottom: 0; }
+tbody tr:hover > * { background: var(--bg-panel); }
 
 .flag {
   margin-left: 8px;
   padding: 1px 5px;
-  border: 1px solid var(--md-error);
-  border-radius: var(--md-corner-xs);
-  color: var(--md-error);
+  border: 1px solid var(--error-border);
+  border-radius: var(--r-xs);
+  color: var(--error);
   font: 400 10px/1.4 var(--font-sans);
 }
 
-td {
-  border-bottom: 1px solid var(--md-outline-variant);
-  text-align: center;
+/* The whole cell is the target; the 15px box inside is only the picture. */
+.cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-width: 44px;
+  height: var(--row-h);
+  padding: 0;
+  background: none;
+  border: 0;
 }
+
+.cell:hover:not(:disabled) { background: var(--bg-hover); }
+.cell:hover:not(:disabled) .mark { border-color: var(--text-secondary); }
+.cell:disabled { cursor: not-allowed; opacity: 0.6; }
 
 /* Fill means granted right here. A ring means it arrives from somewhere else,
    which is the question this screen exists to answer. */
 .mark {
+  display: inline-block;
   width: 15px;
   height: 15px;
-  padding: 0;
-  margin: 0 9px;
-  background: none;
-  border: 1px solid var(--md-outline);
+  border: 1px solid var(--border-strong);
   border-radius: 3px;
-  vertical-align: middle;
-  cursor: pointer;
+  transition: border-color var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
 }
 
-.mark:hover:not(:disabled) { border-color: var(--md-on-surface-variant); }
-.mark:disabled { cursor: not-allowed; }
+.mark.direct { background: var(--text-primary); border-color: var(--text-primary); }
+.mark.inherited { border-color: var(--info); box-shadow: inset 0 0 0 3px var(--info); }
+.mark.pending { background: var(--accent); border-color: var(--accent); box-shadow: none; }
 
-.direct { background: var(--md-on-surface); border-color: var(--md-on-surface); }
-
-.inherited {
-  background: none;
-  border-color: var(--md-tertiary);
-  box-shadow: inset 0 0 0 3px var(--md-tertiary);
-}
-
-.pending {
-  border-color: var(--md-primary);
-  background: var(--md-primary);
-  box-shadow: none;
-}
-
-.add {
+.foot {
   display: flex;
-  gap: 8px;
-  padding: 14px 0 4px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s2) var(--s3);
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border-subtle);
 }
 
-select, .add button {
-  height: 26px;
-  padding: 0 8px;
-  background: var(--md-surface-container-high);
-  border: 1px solid var(--md-outline);
-  border-radius: var(--md-corner-xs);
-  font-size: 12px;
-  cursor: pointer;
-}
+.add { display: flex; gap: 6px; }
 
 .key {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin: 14px 0 0;
-  color: var(--md-on-surface-variant);
-  font-size: 11px;
+  margin: 0 0 0 auto;
+  color: var(--text-tertiary);
+  font-size: var(--fs-xs);
 }
 
-.key .mark { margin: 0 2px 0 10px; cursor: default; }
+.key .mark { margin-left: 10px; }
 .key .mark:first-child { margin-left: 0; }
 </style>

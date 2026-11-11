@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { ident, previewSQL } from './sql.js'
+import { ident, previewSQL, plain } from './sql.js'
 
 test('identifiers are backquoted, and backquotes inside them are escaped', () => {
   assert.equal(ident('events'), '`events`')
@@ -25,4 +25,10 @@ test('paging appends OFFSET only past the first page, and coerces it too', () =>
 test('the row limit is coerced to a number', () => {
   assert.match(previewSQL('demo', 'events', '100; DROP TABLE demo.events'), /LIMIT 100$/)
   assert.match(previewSQL('demo', 'events', undefined), /LIMIT 100$/)
+})
+
+test('plain: HTML error page becomes its title, text passes through', () => {
+  assert.equal(plain('<html>\n<head><title>502 Bad Gateway</title></head></html>'), '502 Bad Gateway')
+  assert.equal(plain('<div>oops</div>'), 'The server sent an HTML error page.')
+  assert.equal(plain('Code: 516. DB::Exception: x < y'), 'Code: 516. DB::Exception: x < y')
 })

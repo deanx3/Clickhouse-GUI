@@ -1,6 +1,9 @@
 <script setup>
 import { ref } from 'vue'
 import { staged, history, unstage, discard, apply } from './ledger'
+import { X, Check, ListChecks } from 'lucide-vue-next'
+import Btn from './ui/Btn.vue'
+import State from './ui/State.vue'
 
 const emit = defineEmits(['applied'])
 const busy = ref(false)
@@ -21,35 +24,42 @@ async function run() {
 <template>
   <aside class="ledger">
     <header>
-      <span>SQL ledger</span>
-      <span v-if="staged.length" class="count">{{ staged.length }} staged</span>
+      <ListChecks :size="14" class="mark" />
+      <span class="ttl">SQL ledger</span>
+      <span v-if="staged.length" class="count num">{{ staged.length }} staged</span>
     </header>
 
     <div class="scroll">
-      <p v-if="!staged.length && !history.length" class="empty">
-        Changes queue up here as SQL. Nothing runs until you apply it.
-      </p>
+      <State v-if="!staged.length && !history.length" title="Nothing staged"
+             hint="Changes queue up here as SQL. Nothing runs until you apply it.">
+        <template #icon><ListChecks :size="20" /></template>
+      </State>
 
-      <div v-for="(entry, i) in staged" :key="entry.sql" class="entry staged">
+      <div v-for="(entry, i) in staged" :key="entry.sql" :class="['entry', 'staged', { failed: entry.error }]">
         <div class="note">
-          {{ entry.note }}
-          <button class="x" title="Remove" @click="unstage(i)">&times;</button>
+          <span>{{ entry.note }}</span>
+          <button :aria-label="`Remove: ${entry.note}`" data-tip-left data-tip="Remove" @click="unstage(i)">
+            <X :size="12" />
+          </button>
         </div>
         <pre>{{ entry.sql }}</pre>
-        <p v-if="entry.error" class="err">{{ entry.error }}</p>
+        <p v-if="entry.error" class="err" role="alert">{{ entry.error }}</p>
       </div>
 
-      <div v-for="(entry, i) in history" :key="`h${i}`" class="entry done">
-        <div class="note">{{ entry.note }}</div>
-        <pre>{{ entry.sql }}</pre>
-      </div>
+      <template v-if="history.length">
+        <h4 class="eyebrow">Applied this session</h4>
+        <div v-for="(entry, i) in history" :key="`h${i}`" class="entry done">
+          <div class="note"><Check :size="12" /><span>{{ entry.note }}</span></div>
+          <pre>{{ entry.sql }}</pre>
+        </div>
+      </template>
     </div>
 
     <footer v-if="staged.length">
-      <button class="ghost" :disabled="busy" @click="discard">Discard</button>
-      <button class="apply" :disabled="busy" @click="run">
+      <Btn :disabled="busy" @click="discard">Discard</Btn>
+      <Btn variant="primary" :loading="busy" @click="run">
         {{ busy ? 'Applying' : `Apply ${staged.length}` }}
-      </button>
+      </Btn>
     </footer>
   </aside>
 </template>
@@ -59,103 +69,102 @@ async function run() {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  border-left: 1px solid var(--md-outline-variant);
-  background: var(--md-surface-container-low);
+  background: var(--bg-panel);
+  border-left: 1px solid var(--border);
 }
 
 header {
   display: flex;
+  flex: none;
   align-items: center;
   gap: 8px;
-  height: 34px;
-  padding: 0 14px;
-  border-bottom: 1px solid var(--md-outline-variant);
-  font-size: 12px;
-  font-weight: 500;
+  height: 40px;
+  padding: 0 var(--s3);
+  border-bottom: 1px solid var(--border-subtle);
 }
 
-.count { margin-left: auto; color: var(--md-primary); font-size: 11px; }
+.mark { color: var(--accent); }
+.ttl { flex: 1; font-size: var(--fs-sm); font-weight: 600; }
 
-.scroll { flex: 1; overflow: auto; padding: 10px; }
-
-.empty {
-  margin: 6px 4px;
-  color: var(--md-on-surface-variant);
-  font-size: 12px;
-  line-height: 1.6;
+.count {
+  padding: 1px 8px;
+  background: var(--accent-subtle);
+  border-radius: var(--r-full);
+  color: var(--accent-text);
+  font-size: var(--fs-xs);
 }
+
+.scroll { flex: 1; overflow: auto; padding: var(--s2); }
+.scroll > .state { height: 100%; }
+
+h4 { margin: var(--s4) 4px var(--s2); }
 
 .entry {
   margin-bottom: 8px;
-  border: 1px solid var(--md-outline-variant);
-  border-radius: var(--md-corner-xs);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-sm);
   overflow: hidden;
+  animation: rise var(--t) var(--ease);
 }
 
-/* Yellow means staged: about to happen, not yet true. */
-.staged { border-color: var(--md-primary-container); }
-.done { opacity: 0.5; }
+/* Orange means staged: about to happen, not yet true. */
+.staged { border-color: var(--accent-border); }
+.failed { border-color: var(--error-border); }
+.done { opacity: 0.6; animation: none; }
 
 .note {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 8px;
-  background: var(--md-surface-container);
-  color: var(--md-on-surface-variant);
-  font-size: 11px;
+  min-height: 28px;
+  padding: 0 4px 0 9px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+  font-weight: 500;
 }
 
-.staged .note { color: var(--md-primary); }
+.note span { flex: 1; min-width: 0; }
+.staged .note { color: var(--accent-text); }
+.done .note svg { color: var(--success); }
 
-.x {
-  margin-left: auto;
-  padding: 0 2px;
+.note button {
+  display: flex;
+  padding: 4px;
   background: none;
   border: 0;
-  color: inherit;
-  font-size: 14px;
-  line-height: 1;
-  cursor: pointer;
+  border-radius: var(--r-xs);
+  color: var(--text-tertiary);
 }
+
+.note button:hover { background: var(--bg-active); color: var(--text-primary); }
 
 pre {
   margin: 0;
-  padding: 7px 8px;
-  font: 400 11.5px/1.5 var(--font-mono);
+  padding: 7px 9px;
+  color: var(--text-primary);
+  font: 400 var(--fs-xs)/1.55 var(--font-mono);
   white-space: pre-wrap;
   word-break: break-word;
 }
 
 .err {
   margin: 0;
-  padding: 6px 8px;
-  background: var(--md-error-container);
-  font: 400 11px/1.4 var(--font-mono);
+  padding: 6px 9px;
+  background: var(--error-subtle);
+  color: var(--error);
+  font: 400 var(--fs-xs)/1.45 var(--font-mono);
+  word-break: break-word;
 }
 
 footer {
   display: flex;
+  flex: none;
   gap: 8px;
-  padding: 10px;
-  border-top: 1px solid var(--md-outline-variant);
+  padding: var(--s2);
+  border-top: 1px solid var(--border);
 }
 
-footer button {
-  flex: 1;
-  height: 30px;
-  border-radius: var(--md-corner-xs);
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.ghost {
-  background: none;
-  border: 1px solid var(--md-outline);
-  color: var(--md-on-surface-variant);
-}
-
-.apply { background: var(--md-primary); border: 0; color: var(--md-on-primary); }
-button:disabled { opacity: 0.45; cursor: not-allowed; }
+footer > * { flex: 1; }
 </style>

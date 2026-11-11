@@ -2,6 +2,9 @@
 import { computed, ref, watch } from 'vue'
 import { query } from './api'
 import Results from './Results.vue'
+import State from './ui/State.vue'
+import Btn from './ui/Btn.vue'
+import { RefreshCw } from 'lucide-vue-next'
 
 // ClickHouse tags GRANT and REVOKE with their own query_kind, but lumps user
 // DDL in with table DDL under Create/Drop/Alter, so those need the statement
@@ -66,27 +69,38 @@ async function load() {
 <template>
   <div class="log">
     <div class="bar">
-      <div class="tabs">
-        <button :class="{ on: mode === 'access' }" @click="mode = 'access'">Access changes</button>
-        <button :class="{ on: mode === 'all' }" @click="mode = 'all'">All queries</button>
+      <div class="seg" role="tablist" aria-label="Which queries">
+        <button role="tab" :aria-selected="mode === 'access'" :class="{ on: mode === 'access' }"
+                @click="mode = 'access'">Access changes</button>
+        <button role="tab" :aria-selected="mode === 'all'" :class="{ on: mode === 'all' }"
+                @click="mode = 'all'">All queries</button>
       </div>
 
-      <select v-model="who">
-        <option value="">Anyone</option>
-        <option v-for="u in users" :key="u" :value="u">{{ u }}</option>
-      </select>
+      <label class="who">
+        User
+        <select v-model="who" class="select sm">
+          <option value="">Anyone</option>
+          <option v-for="u in users" :key="u" :value="u">{{ u }}</option>
+        </select>
+      </label>
 
-      <span class="hint">
-        ClickHouse already keeps this. Nothing here is a log chgui writes.
-      </span>
+      <span class="hint">Latest 200, read from ClickHouse's own system.query_log.</span>
 
-      <button class="ghost" :disabled="busy" @click="load">
-        {{ busy ? 'Loading' : 'Refresh' }}
-      </button>
+      <Btn size="sm" :disabled="busy" @click="load">
+        <template #icon><RefreshCw :size="13" :class="{ turning: busy }" /></template>Refresh
+      </Btn>
     </div>
 
-    <p v-if="error" class="error">{{ error }}</p>
-    <Results v-else-if="result" :result="result" />
+    <div class="out">
+      <State v-if="error" kind="error" title="Could not read the query log" :detail="error">
+        <template #actions><Btn size="sm" variant="primary" @click="load">Try again</Btn></template>
+      </State>
+      <State v-else-if="!result" kind="loading" title="Loading" />
+      <State v-else-if="!result.rows"
+             :title="mode === 'access' ? 'No access changes logged' : 'No queries logged'"
+             :hint="who ? `Nothing from ${who}. Try Anyone.` : 'Nothing matching in system.query_log yet.'" />
+      <Results v-else :result="result" :class="{ stale: busy }" />
+    </div>
   </div>
 </template>
 
@@ -95,61 +109,51 @@ async function load() {
 
 .bar {
   display: flex;
+  flex: none;
   align-items: center;
-  gap: 12px;
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--md-outline-variant);
+  gap: var(--s3);
+  height: 40px;
+  padding: 0 var(--s3);
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
 }
 
-.tabs { display: flex; gap: 1px; }
+.seg { display: flex; gap: 2px; }
 
-.tabs button {
-  height: 26px;
-  padding: 0 12px;
-  background: var(--md-surface-container-low);
-  border: 1px solid var(--md-outline-variant);
-  color: var(--md-on-surface-variant);
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.tabs button:first-child { border-radius: var(--md-corner-xs) 0 0 var(--md-corner-xs); }
-.tabs button:last-child { border-radius: 0 var(--md-corner-xs) var(--md-corner-xs) 0; }
-
-.tabs button.on {
-  background: var(--md-surface-container-high);
-  border-color: var(--md-outline);
-  color: var(--md-on-surface);
-  font-weight: 500;
-}
-
-select {
-  height: 26px;
-  padding: 0 8px;
-  background: var(--md-surface-container-high);
-  border: 1px solid var(--md-outline);
-  border-radius: var(--md-corner-xs);
-  font-size: 12px;
-}
-
-.hint { margin-left: auto; color: var(--md-on-surface-variant); font-size: 11.5px; }
-
-.ghost {
-  height: 26px;
-  padding: 0 12px;
+.seg button {
+  height: 28px;
+  padding: 0 11px;
   background: none;
-  border: 1px solid var(--md-outline);
-  border-radius: var(--md-corner-xs);
-  color: var(--md-on-surface-variant);
-  font-size: 12px;
-  cursor: pointer;
+  border: 0;
+  border-radius: var(--r-sm);
+  color: var(--text-tertiary);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
 }
 
-.error {
-  margin: 14px;
-  padding: 10px 12px;
-  background: var(--md-error-container);
-  border-radius: var(--md-corner-xs);
-  font: 400 12px/1.5 var(--font-mono);
+.seg button:hover { background: var(--bg-hover); color: var(--text-secondary); }
+.seg button.on { background: var(--bg-active); color: var(--text-primary); }
+
+.who { display: flex; align-items: center; gap: 7px; color: var(--text-tertiary); font-size: var(--fs-xs); }
+
+.hint {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font-size: var(--fs-xs);
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
+
+.turning { animation: spin 900ms linear infinite; }
+
+.out { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.out > * { flex: 1; min-height: 0; }
+.stale { opacity: 0.55; transition: opacity var(--t) var(--ease); }
+
+@media (max-width: 760px) { .hint { display: none; } }
 </style>

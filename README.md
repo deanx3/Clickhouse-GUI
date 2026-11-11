@@ -39,8 +39,16 @@ and the read/insert `etl` / `etl`.
 | `CHGUI_CONNECTIONS`    | JSON or a file listing servers                   |
 | `CHGUI_SECRET`         | 64 hex chars. Without it, restarts sign you out  |
 | `CHGUI_SECURE_COOKIE`  | `1` when served over HTTPS                       |
+| `CHGUI_AI_URL`         | Assistant: an OpenAI-compatible API, ending `/v1` |
+| `CHGUI_AI_MODEL`       | Assistant: model name. Both are needed to turn it on |
+| `CHGUI_AI_KEY`         | Assistant: API key, if the server wants one      |
+| `CHGUI_AI_EXTRA`       | Assistant: extra request fields, as JSON         |
 
 Passwords are encrypted, never stored in plain text. Use HTTPS over a network.
+
+The assistant reads your schema and runs read-only queries as you, so it sees
+only what your account can. Table names and up to 50 rows per query are sent to
+the model server. It cannot change anything: you run the SQL it writes.
 
 ## Development
 

@@ -186,7 +186,6 @@ async function submit() {
         <Field
           id="password"
           v-model="password"
-          class="pw"
           name="password"
           type="password"
           label="Password"
@@ -388,7 +387,7 @@ h1 { margin: 0; font-size: var(--fs-xl); font-weight: 600; letter-spacing: -0.02
 .down-msg span { flex: 1; }
 .retry { flex: none; }
 
-.pw { margin-top: var(--s4); }
+form > * + * { margin-top: var(--s4); }
 .go { width: 100%; height: 38px; margin-top: var(--s5); font-size: var(--fs-md); }
 
 .error {

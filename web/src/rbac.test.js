@@ -1,6 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { roleClosure, resolve, sourceLabel, grantSQL, revokeSQL, scopeSQL } from './rbac.js'
+import {
+  roleClosure, resolve, sourceLabel, grantSQL, revokeSQL, scopeSQL, hostSQL, validAddr, ANY_HOST,
+} from './rbac.js'
 
 // [user_name, role_name, granted_role_name]
 const EDGES = [
@@ -58,4 +60,28 @@ test('scopes and grantees are quoted in generated statements', () => {
   assert.equal(grantSQL('SELECT', 'demo', 'events', 'an`alyst'),
     'GRANT SELECT ON `demo`.`events` TO `an\\`alyst`')
   assert.equal(revokeSQL('SELECT', null, null, 'bob'), 'REVOKE SELECT ON *.* FROM `bob`')
+})
+
+test('host statements spell out the whole list, in a stable order', () => {
+  const none = { ip: [], names: [], regexp: [], like: [] }
+  assert.equal(hostSQL('etl', ANY_HOST), 'ALTER USER `etl` HOST ANY')
+  assert.equal(hostSQL('etl', none), 'ALTER USER `etl` HOST NONE')
+  assert.equal(
+    hostSQL('etl', { ...none, ip: ['192.168.1.5', '10.0.0.0/8'], names: ['box'], like: ["%.l'an"] }),
+    "ALTER USER `etl` HOST IP '10.0.0.0/8', IP '192.168.1.5', LIKE '%.l\\'an', NAME 'box'",
+  )
+  assert.equal(
+    hostSQL('etl', { ...none, ip: ['b', 'a'] }),
+    hostSQL('etl', { ...none, ip: ['a', 'b'] }),
+  )
+})
+
+test('validAddr takes addresses and subnets, nothing else', () => {
+  for (const ok of ['10.0.0.1', '10.0.0.0/8', '0.0.0.0/0', '::1', '2001:db8::/32', '::ffff:10.0.0.1', '::/0']) {
+    assert.ok(validAddr(ok), ok)
+  }
+  for (const bad of ['', 'box.example', '10.0.0', '10.0.0.256', '10.0.0.0/33', '10.0.0.0/', '1.2.3.4/8/9',
+    "1.1.1.1' OR", '2001:db8::/129', 'abc']) {
+    assert.ok(!validAddr(bad), bad)
+  }
 })

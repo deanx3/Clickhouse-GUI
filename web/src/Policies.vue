@@ -2,6 +2,8 @@
 import { ref } from 'vue'
 import { query } from './api'
 import Results from './Results.vue'
+import State from './ui/State.vue'
+import Btn from './ui/Btn.vue'
 
 // Read-only for now: these three are worth seeing next to users and roles, but
 // editing them is a separate shape of form and nobody has asked yet.
@@ -44,6 +46,7 @@ const error = ref('')
 
 load()
 async function load() {
+  error.value = ''
   try {
     const rows = await Promise.all(SECTIONS.map((s) => query(s.sql)))
     results.value = Object.fromEntries(SECTIONS.map((s, i) => [s.title, rows[i]]))
@@ -55,43 +58,57 @@ async function load() {
 
 <template>
   <div class="policies">
-    <p v-if="error" class="error">{{ error }}</p>
+    <State v-if="error" kind="error" title="Could not load policies" :detail="error">
+      <template #actions><Btn size="sm" variant="primary" @click="load">Try again</Btn></template>
+    </State>
 
-    <section v-for="s in SECTIONS" :key="s.title">
-      <h3>{{ s.title }}</h3>
-      <p class="blurb">{{ s.blurb }}</p>
-      <div v-if="results[s.title]?.rows === 0" class="empty">None defined.</div>
-      <Results v-else-if="results[s.title]" :result="results[s.title]" />
-    </section>
+    <State v-else-if="!Object.keys(results).length" kind="loading" title="Loading policies" />
+
+    <template v-else>
+      <section v-for="s in SECTIONS" :key="s.title">
+        <h3>{{ s.title }} <span class="count num">{{ results[s.title].rows }}</span></h3>
+        <p class="blurb">{{ s.blurb }}</p>
+        <div class="card">
+          <p v-if="results[s.title].rows === 0" class="none">None defined.</p>
+          <Results v-else :result="results[s.title]" />
+        </div>
+      </section>
+    </template>
   </div>
 </template>
 
 <style scoped>
-.policies { overflow: auto; padding: 20px 24px; height: 100%; }
+.policies { height: 100%; overflow: auto; padding: var(--s6) var(--s8) var(--s10); }
+.policies > .state { height: 100%; }
 
-section { margin-bottom: 34px; }
+section { margin-bottom: var(--s8); }
 
 h3 {
-  margin: 0 0 4px;
-  color: var(--md-on-surface-variant);
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: 600;
 }
 
-.blurb { margin: 0 0 12px; color: var(--md-on-surface-variant); font-size: 12.5px; }
+.count {
+  padding: 0 7px;
+  background: var(--bg-active);
+  border-radius: var(--r-full);
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+}
 
-.empty { color: var(--md-on-surface-variant); font-size: 13px; }
+.blurb { margin: 3px 0 var(--s3); color: var(--text-tertiary); font-size: var(--fs-sm); }
+
+.card { border: 1px solid var(--border-subtle); border-radius: var(--r-md); overflow: hidden; }
+.none { margin: 0; padding: var(--s4); color: var(--text-tertiary); font-size: var(--fs-sm); }
 
 /* Results stretches to fill by default; here each table should only be as
    tall as its own rows. */
 section :deep(.grid) { flex: none; max-height: 340px; }
 
-.error {
-  padding: 10px 12px;
-  background: var(--md-error-container);
-  border-radius: var(--md-corner-xs);
-  font: 400 12px/1.5 var(--font-mono);
-}
+@media (max-width: 900px) { .policies { padding: var(--s4); } }
 </style>

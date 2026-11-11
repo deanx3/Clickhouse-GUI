@@ -119,7 +119,4 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', away))
 }
 
 .item:hover { background: var(--error-subtle); color: var(--error); }
-
-.pop-enter-active, .pop-leave-active { transition: all var(--t-fast) var(--ease); }
-.pop-enter-from, .pop-leave-to { opacity: 0; transform: translateY(-5px) scale(0.98); }
 </style>

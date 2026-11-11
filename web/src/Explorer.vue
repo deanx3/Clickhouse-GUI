@@ -2,12 +2,12 @@
 import { computed, defineAsyncComponent, nextTick, ref, watch } from 'vue'
 import {
   Play, Wand2, Eraser, History as HistoryIcon, ChevronLeft, ChevronRight,
-  PanelLeftClose, PanelLeftOpen, TableProperties, Terminal,
+  PanelLeftClose, PanelLeftOpen, TableProperties, Terminal, Sparkles,
 } from 'lucide-vue-next'
 import { query } from './api'
 import { previewSQL, qualified } from './sql'
 import { record } from './history'
-import { pref, setPref } from './prefs'
+import { pref, setPref, modKey } from './prefs'
 import { copy } from './clipboard'
 import { toast } from './toast'
 import { startDrag, clamp } from './resizer'
@@ -16,8 +16,12 @@ const Editor = defineAsyncComponent(() => import('./Editor.vue'))
 import Results from './Results.vue'
 import TableInfo from './TableInfo.vue'
 import History from './History.vue'
+import Assistant from './Assistant.vue'
 import State from './ui/State.vue'
 import Btn from './ui/Btn.vue'
+
+// assistant: whether the server has a model configured.
+const props = defineProps({ assistant: Boolean })
 
 /* --- schema -------------------------------------------------------------- */
 const databases = ref([])
@@ -43,8 +47,13 @@ const sidebarOpen = ref(pref('sidebarOpen', true))
 const editorH = ref(pref('editorH', 240))
 const historyOpen = ref(false)
 const resultsFull = ref(false)
+const aiOpen = ref(pref('aiOpen', false))
+const aiW = ref(pref('aiW', 380))
+const aiRef = ref(null)
 
 watch(sidebar, (v) => setPref('sidebar', v))
+watch(aiOpen, (v) => setPref('aiOpen', v))
+watch(aiW, (v) => setPref('aiW', v))
 watch(sidebarOpen, (v) => setPref('sidebarOpen', v))
 watch(editorH, (v) => setPref('editorH', v))
 watch(limit, (v) => setPref('limit', v))
@@ -54,6 +63,11 @@ watch(selected, (v) => setPref('selected', v))
 const dragSidebar = (e) => {
   const from = sidebar.value
   startDrag(e, { onMove: (dx) => { sidebar.value = clamp(from + dx, 200, 520) } })
+}
+
+const dragAssistant = (e) => {
+  const from = aiW.value
+  startDrag(e, { onMove: (dx) => { aiW.value = clamp(from - dx, 300, 640) } })
 }
 
 const dragEditor = (e) => {
@@ -230,11 +244,29 @@ function useHistory(text, immediate = false) {
   else focusEditor()
 }
 
+/* --- assistant ----------------------------------------------------------- */
+const aiContext = computed(() => ({
+  sql: sql.value,
+  database: selected.value?.db ?? '',
+  table: selected.value?.table ?? '',
+  error: queryError.value,
+}))
+
+function toggleAssistant() {
+  aiOpen.value = !aiOpen.value
+  if (aiOpen.value) aiRef.value?.focus()
+}
+
+function askToFix() {
+  aiOpen.value = true
+  aiRef.value?.send('This statement failed. Why, and what is the fix?')
+}
+
 const copyName = (db, table) =>
   copy(table ? qualified(db, table).replace(/`/g, '') : db, 'Name copied')
 
 defineExpose({
-  run, newQuery, formatQuery, clearQuery, refreshSchema, focusEditor, browse,
+  run, newQuery, formatQuery, clearQuery, refreshSchema, focusEditor, browse, toggleAssistant,
   toggleHistory: () => { historyOpen.value = !historyOpen.value },
   toggleSidebar: () => { sidebarOpen.value = !sidebarOpen.value },
   tableList: () => Object.entries(tables.value).flatMap(([db, rows]) => rows.map(([t]) => ({ db, table: t }))),
@@ -243,7 +275,8 @@ defineExpose({
 
 <template>
   <div class="workspace" :class="{ 'no-side': !sidebarOpen }"
-       :style="{ '--side': `${sidebar}px`, '--hist': historyOpen ? '320px' : '0px' }">
+       :style="{ '--side': `${sidebar}px`, '--hist': historyOpen ? '320px' : '0px',
+                 '--ai': assistant && aiOpen ? `${aiW}px` : '0px' }">
     <aside v-if="sidebarOpen" class="side">
       <SchemaTree
         :databases="databases" :tables="tables" :columns="columns"
@@ -279,6 +312,9 @@ defineExpose({
              @click="historyOpen = !historyOpen">
           <template #icon><HistoryIcon :size="14" /></template>History
         </Btn>
+        <Btn v-if="assistant" size="sm" :variant="aiOpen ? 'subtle' : 'ghost'" @click="toggleAssistant">
+          <template #icon><Sparkles :size="14" /></template>Assistant
+        </Btn>
       </nav>
 
       <template v-if="tab === 'structure'">
@@ -296,7 +332,7 @@ defineExpose({
           <Btn variant="primary" size="sm" :loading="busy" @click="run">
             <template #icon><Play :size="13" /></template>
             Run
-            <template #after><kbd class="on-primary">&#8984;&#9166;</kbd></template>
+            <template #after><kbd class="on-primary">{{ modKey }} &#9166;</kbd></template>
           </Btn>
           <Btn size="sm" variant="ghost" data-tip="Format SQL" @click="formatQuery">
             <template #icon><Wand2 :size="13" /></template>Format
@@ -325,7 +361,7 @@ defineExpose({
 
           <label class="limit">
             Rows
-            <select v-model.number="limit" @change="relimit">
+            <select v-model.number="limit" class="select sm" @change="relimit">
               <option :value="100">100</option>
               <option :value="1000">1000</option>
               <option :value="10000">10000</option>
@@ -339,34 +375,53 @@ defineExpose({
           <State v-if="queryError" kind="error" title="Query failed" :detail="queryError">
             <template #actions>
               <Btn size="sm" variant="primary" @click="run">Run again</Btn>
+              <Btn v-if="assistant" size="sm" @click="askToFix">
+                <template #icon><Sparkles :size="13" /></template>Ask the assistant
+              </Btn>
             </template>
           </State>
           <Results v-else-if="result" :result="result" :sql="sql"
                    @fullscreen="resultsFull = $event" />
           <State v-else-if="busy" kind="loading" title="Running" />
           <State v-else title="No results yet"
-                 hint="Write a statement and press ⌘↵, or pick a table on the left." />
+                 :hint="`Write a statement and press ${modKey} ↵, or pick a table on the left.`" />
         </div>
       </template>
     </section>
 
-    <History v-if="historyOpen" @use="useHistory" @close="historyOpen = false" />
+    <History v-if="historyOpen" class="hist" @use="useHistory" @close="historyOpen = false" />
+
+    <!-- v-show, so closing the panel does not throw the conversation away. -->
+    <div v-if="assistant" v-show="aiOpen" class="ai">
+      <span class="grip left" @mousedown="dragAssistant" />
+      <Assistant ref="aiRef" :context="aiContext" @use="useHistory" @close="aiOpen = false" />
+    </div>
   </div>
 </template>
 
 <style scoped>
 .workspace {
   display: grid;
-  grid-template-columns: var(--side) minmax(0, 1fr) var(--hist);
+  grid-template-columns: var(--side) minmax(0, 1fr) var(--hist) var(--ai);
+  /* Without this the row grows to the tallest panel: opening a big database
+     pushed the results off-screen instead of scrolling the tree. */
+  grid-template-rows: minmax(0, 1fr);
   height: 100%;
   min-height: 0;
 }
 
-.no-side { grid-template-columns: 0 minmax(0, 1fr) var(--hist); }
+.no-side { grid-template-columns: 0 minmax(0, 1fr) var(--hist) var(--ai); }
+
+/* Panels come and go, so each names its column instead of taking the next free one. */
+.side { grid-column: 1; }
+.main { grid-column: 2; }
+.hist { grid-column: 3; }
+.ai { grid-column: 4; position: relative; min-width: 0; min-height: 0; }
 
 .side {
   position: relative;
   min-width: 0;
+  min-height: 0;
   background: var(--bg-panel);
   border-right: 1px solid var(--border);
 }
@@ -379,6 +434,7 @@ defineExpose({
 
 .grip { top: 0; right: -3px; width: 6px; height: 100%; cursor: col-resize; }
 .grip:hover { background: var(--accent); }
+.grip.left { right: auto; left: -3px; }
 
 .main { display: flex; flex-direction: column; min-width: 0; min-height: 0; position: relative; }
 
@@ -446,16 +502,6 @@ defineExpose({
   font-size: var(--fs-xs);
 }
 
-.limit select {
-  height: 26px;
-  padding: 0 6px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  color: var(--text-primary);
-  font-size: var(--fs-xs);
-}
-
 .on-primary { background: rgb(0 0 0 / 0.16); border-color: rgb(0 0 0 / 0.22); color: inherit; opacity: 0.75; }
 
 .out { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
@@ -464,6 +510,7 @@ defineExpose({
 @media (max-width: 860px) {
   .workspace { grid-template-columns: minmax(0, 1fr); }
   .side { display: none; }
+  .main, .hist, .ai { grid-column: 1; }
   .limit, .pager-off { display: none; }
 }
 </style>

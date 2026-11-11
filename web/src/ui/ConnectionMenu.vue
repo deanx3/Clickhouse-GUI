@@ -102,7 +102,7 @@ defineExpose({ refresh })
 </script>
 
 <template>
-  <div ref="root" class="cm">
+  <div ref="root" class="cm" @keydown.esc="open = false; mode = null">
     <button class="trigger" :aria-expanded="open" @click="open = !open">
       <Server :size="14" />
       <span class="label">{{ activeRow()?.name ?? 'Connection' }}</span>
@@ -165,14 +165,14 @@ defineExpose({ refresh })
                   <option value="https">https</option>
                 </select>
               </label>
-              <Field v-model="form.host" class="host" label="Host"
+              <Field v-model="form.host" label="Host"
                      placeholder="clickhouse.internal" mono :invalid="!!error"
                      @blur="splitHost" />
-              <Field v-model="form.port" class="port" label="Port"
+              <Field v-model="form.port" label="Port"
                      :placeholder="DEFAULT_PORT" mono inputmode="numeric" />
             </div>
 
-            <p class="preview ident">{{ buildURL(form) }}</p>
+            <p v-if="form.host.trim()" class="preview ident">{{ buildURL(form) }}</p>
 
             <Field v-model="form.user" label="User" placeholder="default" mono />
             <Field v-model="form.password" label="Password" type="password" reveal />
@@ -239,7 +239,7 @@ defineExpose({ refresh })
 .head {
   margin: 0;
   padding: 7px 9px;
-  color: var(--text-disabled);
+  color: var(--text-tertiary);
   font-size: var(--fs-xs);
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -283,7 +283,7 @@ defineExpose({ refresh })
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text-tertiary);
-  font-size: 10px;
+  font-size: var(--fs-xs);
 }
 
 .tick { flex: none; color: var(--accent); }
@@ -333,8 +333,9 @@ defineExpose({ refresh })
 }
 
 .hostrow { display: flex; gap: 6px; align-items: flex-end; }
-.hostrow .host { flex: 1; min-width: 0; }
-.hostrow .port { width: 74px; flex: none; }
+/* Field forwards class to its <input>, so size the wrappers by position. */
+.hostrow > :nth-child(2) { flex: 1; min-width: 0; }
+.hostrow > :nth-child(3) { width: 74px; flex: none; }
 
 .scheme { width: 78px; flex: none; }
 
@@ -388,14 +389,14 @@ defineExpose({ refresh })
   display: block;
   margin-top: 2px;
   color: var(--error);
-  font-size: 9px;
+  font-size: 10px;
   line-height: 1.4;
 }
 
 .shared {
   display: block;
-  color: var(--text-disabled);
-  font-size: 9px;
+  color: var(--text-tertiary);
+  font-size: 10px;
   letter-spacing: 0.03em;
   text-transform: uppercase;
 }

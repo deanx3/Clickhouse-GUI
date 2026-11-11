@@ -1,4 +1,5 @@
 import { beginRequest, requestOk, requestFailed } from './status'
+import { plain } from './sql'
 
 // Every call goes through the Go server, which attaches the signed-in user's
 // ClickHouse credentials from the session cookie.
@@ -18,7 +19,7 @@ async function post(path, body) {
 
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
-    const message = data.error || `Request failed (${res.status})`
+    const message = plain(data.error || `Request failed (${res.status})`)
     requestFailed(message, res.status >= 500)
     const err = new Error(message)
     err.status = res.status
@@ -56,4 +57,28 @@ export async function ping(url) {
 export async function me() {
   const res = await fetch('/api/me')
   return res.ok ? res.json() : null
+}
+
+// The assistant answers as a stream of JSON lines: one per lookup it makes,
+// then the reply. onEvent gets each as it arrives.
+export async function ask(body, onEvent, signal) {
+  const res = await fetch('/api/agent', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    signal,
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error(data.error || `Request failed (${res.status})`)
+  }
+  const reader = res.body.pipeThrough(new TextDecoderStream()).getReader()
+  let buf = ''
+  for (;;) {
+    const { value, done } = await reader.read()
+    if (done) break
+    const lines = (buf + value).split('\n')
+    buf = lines.pop()
+    for (const line of lines) if (line.trim()) onEvent(JSON.parse(line))
+  }
 }

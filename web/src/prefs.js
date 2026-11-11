@@ -15,3 +15,7 @@ export function setPref(name, value) {
   cache = { ...cache, [name]: value }
   try { localStorage.setItem(KEY, JSON.stringify(cache)) } catch { /* not fatal */ }
 }
+
+// The modifier the platform prints on its keys, for shortcut hints.
+const mac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
+export const modKey = mac ? '⌘' : 'Ctrl'

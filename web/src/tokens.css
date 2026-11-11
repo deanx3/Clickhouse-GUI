@@ -1,8 +1,6 @@
 /* ============================================================================
    chgui design system
-   Three layers: primitives (raw values) -> semantic roles -> component aliases.
-   The --md-* names at the bottom are the original Material 3 role names, kept
-   so the access screens keep working while the palette underneath changed.
+   Two layers: primitives (raw values) -> semantic roles.
    ========================================================================= */
 :root {
   /* --- surfaces: a deep charcoal ladder, faintly blue so it reads cool ---- */
@@ -20,8 +18,8 @@
 
   --text-primary: #e6eaf2;
   --text-secondary: #99a3b8;
-  --text-tertiary: #6b7488;
-  --text-disabled: #4a5163;
+  --text-tertiary: #7c859a;
+  --text-disabled: #596175;
 
   /* --- one accent, carried over from the reference and from the ledger,
          where orange already means "staged, not yet true" ------------------ */
@@ -71,32 +69,6 @@
   --row-h: 32px;
   --control-h: 30px;
   --header-h: 48px;
-
-  /* --- Material 3 role names the access screens still reference ---------- */
-  --md-surface: var(--bg-base);
-  --md-surface-container-low: var(--bg-panel);
-  --md-surface-container: var(--bg-elevated);
-  --md-surface-container-high: var(--bg-hover);
-  --md-surface-container-highest: var(--bg-active);
-  --md-on-surface: var(--text-primary);
-  --md-on-surface-variant: var(--text-secondary);
-  --md-outline: var(--border-strong);
-  --md-outline-variant: var(--border);
-  --md-primary: var(--accent);
-  --md-on-primary: #2b1400;
-  --md-primary-container: #6b3a10;
-  --md-on-primary-container: var(--accent-hover);
-  --md-tertiary: var(--info);
-  --md-tertiary-container: rgb(88 166 255 / 0.18);
-  --md-error: var(--error);
-  --md-on-error: #40100c;
-  --md-error-container: var(--error-subtle);
-  --md-corner-xs: var(--r-xs);
-  --md-corner-sm: var(--r-sm);
-  --md-corner-md: var(--r-md);
-  --md-corner-lg: var(--r-lg);
-  --md-state-hover: 0.06;
-  --md-state-press: 0.1;
 }
 
 * { box-sizing: border-box; }
@@ -118,6 +90,67 @@ button, input, select, textarea { font: inherit; color: inherit; }
 option { background: var(--bg-elevated); color: var(--text-primary); }
 button { cursor: pointer; }
 button:disabled { cursor: not-allowed; }
+
+/* One native select, everywhere. */
+.select {
+  height: var(--control-h);
+  padding: 0 8px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text-primary);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  transition: border-color var(--t-fast) var(--ease);
+}
+.select:hover:not(:disabled) { border-color: var(--border-strong); }
+.select:disabled { opacity: 0.5; cursor: not-allowed; }
+.select.sm { height: 26px; padding: 0 6px; font-size: var(--fs-xs); }
+
+/* Filter input with a leading icon: schema tree, history, access lists. */
+.searchbox {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  height: var(--control-h);
+  padding: 0 6px 0 9px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text-tertiary);
+  transition: border-color var(--t-fast) var(--ease);
+}
+.searchbox:focus-within { border-color: var(--accent); }
+.searchbox input {
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: 0;
+  outline: none;
+  color: var(--text-primary);
+  font-size: var(--fs-sm);
+}
+.searchbox input::placeholder { color: var(--text-disabled); }
+.searchbox button {
+  display: flex;
+  padding: 3px;
+  background: none;
+  border: 0;
+  border-radius: var(--r-xs);
+  color: inherit;
+}
+.searchbox button:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+/* Section label used above lists, blocks and panels. */
+.eyebrow {
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
 
 /* Identifiers are literal SQL tokens, so they are always monospace. */
 .ident { font-family: var(--font-mono); font-size: var(--fs-sm); }
@@ -180,6 +213,11 @@ kbd {
   color: var(--text-secondary);
   font: 500 10px/1.5 var(--font-sans);
 }
+
+/* Dropdown menus (connection, user). Global: scoped styles do not reach a
+   <Transition> in another component. */
+.pop-enter-active, .pop-leave-active { transition: all var(--t-fast) var(--ease); }
+.pop-enter-from, .pop-leave-to { opacity: 0; transform: translateY(-5px) scale(0.98); }
 
 @keyframes fade-in { from { opacity: 0 } to { opacity: 1 } }
 @keyframes rise { from { opacity: 0; transform: translateY(6px) } to { opacity: 1; transform: none } }

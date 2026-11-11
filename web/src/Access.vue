@@ -5,12 +5,18 @@ import { ident } from './sql'
 import {
   roleClosure, grantRoleSQL, revokeRoleSQL,
   createUserSQL, dropUserSQL, createRoleSQL, dropRoleSQL,
+  ANY_HOST, anyHost, hostList, hostSQL, validAddr,
 } from './rbac'
-import { stage } from './ledger'
+import { stage, staged, unstage } from './ledger'
 import Grants from './Grants.vue'
 import Btn from './ui/Btn.vue'
 import Field from './ui/Field.vue'
-import { Trash2, UserPlus, ShieldPlus, Plus } from 'lucide-vue-next'
+import State from './ui/State.vue'
+import Skeleton from './ui/Skeleton.vue'
+import { copy } from './clipboard'
+import {
+  Trash2, UserPlus, ShieldPlus, Plus, Search, X, Copy, UserRound, Shield, Lock,
+} from 'lucide-vue-next'
 
 const props = defineProps({ kind: String }) // 'user' | 'role'
 
@@ -20,12 +26,24 @@ const roleGrants = ref([])
 const allRoles = ref([])
 const tables = ref([])
 const ddl = ref('')
+const ddlError = ref('')
 const error = ref('')
+const loading = ref(false)
+const filter = ref('')
 const chosen = ref(null)
 
 const newName = ref('')
 const newPassword = ref('')
 const addRole = ref('')
+const newHost = ref('')
+const hostError = ref('')
+
+const kindIcon = computed(() => (props.kind === 'user' ? UserRound : Shield))
+
+const shown = computed(() => {
+  const q = filter.value.trim().toLowerCase()
+  return q ? principals.value.filter(([n]) => n.toLowerCase().includes(q)) : principals.value
+})
 
 const current = computed(() => principals.value.find((p) => p[0] === chosen.value))
 
@@ -52,10 +70,12 @@ watch(chosen, showCreate)
 
 async function load() {
   error.value = ''
+  loading.value = true
   try {
     const [people, g, rg, roles, tbl] = await Promise.all([
       query(props.kind === 'user'
-        ? 'SELECT name, storage, arrayStringConcat(auth_type, \', \') AS auth'
+        ? 'SELECT name, storage, arrayStringConcat(auth_type, \', \') AS auth,'
+        + ' host_ip, host_names, host_names_regexp, host_names_like'
         + ' FROM system.users ORDER BY name'
         : "SELECT name, storage, '' AS auth FROM system.roles ORDER BY name"),
       query('SELECT user_name, role_name, access_type, database, table, is_partial_revoke' +
@@ -74,11 +94,14 @@ async function load() {
     if (chosen.value && !people.data.some(([n]) => n === chosen.value)) chosen.value = null
   } catch (e) {
     error.value = e.message
+  } finally {
+    loading.value = false
   }
 }
 
 async function showCreate() {
   ddl.value = ''
+  ddlError.value = ''
   if (!chosen.value) return
   try {
     // SHOW CREATE redacts the password, so this is safe to put on screen.
@@ -87,7 +110,7 @@ async function showCreate() {
     const r = await query(`SHOW CREATE ${kw} ${ident(chosen.value)}`)
     ddl.value = r.data.map((row) => row[0]).join('\n')
   } catch (e) {
-    ddl.value = e.message
+    ddlError.value = e.message
   }
 }
 
@@ -126,40 +149,110 @@ const detachRole = (role) => stage({
   note: `Revoke role ${role} · ${chosen.value}`,
 })
 
+/* --- allowed hosts ------------------------------------------------------- */
+const serverHosts = computed(() => {
+  const [, , , ip = [], names = [], regexp = [], like = []] = current.value ?? []
+  return { ip, names, regexp, like }
+})
+
+// ALTER USER ... HOST replaces the whole list, so a user has at most one host
+// statement staged, carrying the full list as it will be. The chips show that.
+const hostEntry = computed(() => staged.value.find((e) => e.hostsOf === chosen.value))
+const hosts = computed(() => hostEntry.value?.hosts ?? serverHosts.value)
+
+function setHosts(next) {
+  const at = staged.value.indexOf(hostEntry.value)
+  if (at >= 0) unstage(at)
+  const sql = hostSQL(chosen.value, next)
+  if (sql === hostSQL(chosen.value, serverHosts.value)) return // back where it started
+  stage({ sql, note: `Allowed hosts · ${chosen.value}`, hostsOf: chosen.value, hosts: next })
+}
+
+function addHost() {
+  const value = newHost.value.trim()
+  if (!validAddr(value)) {
+    hostError.value = 'Enter an IP address or subnet, like 192.168.1.5 or 10.0.0.0/8.'
+    return
+  }
+  hostError.value = ''
+  newHost.value = ''
+  const h = hosts.value
+  // The first address replaces "any host": that is the point of adding one.
+  if (anyHost(h)) setHosts({ ip: [value], names: [], regexp: [], like: [] })
+  else if (!h.ip.includes(value)) setHosts({ ...h, ip: [...h.ip, value] })
+}
+
+const removeHost = ({ kind, value }) =>
+  setHosts({ ...hosts.value, [kind]: hosts.value[kind].filter((v) => v !== value) })
+
+watch(chosen, () => { newHost.value = ''; hostError.value = '' })
+
 defineExpose({ reload: () => { load(); showCreate() } })
 </script>
 
 <template>
   <div class="access">
     <aside class="list">
-      <div v-for="[name, storage] in principals" :key="name"
-           :class="['row', { on: name === chosen }]" @click="chosen = name">
-        <span class="ident">{{ name }}</span>
-        <span v-if="storage === 'users_xml'" class="tag" title="Defined in users.xml, not editable by SQL">xml</span>
+      <div class="lhead">
+        <span class="eyebrow">{{ kind }}s</span>
+        <span class="count num">{{ principals.length }}</span>
+      </div>
+
+      <div class="searchbox">
+        <Search :size="14" />
+        <input v-model="filter" :placeholder="`Filter ${kind}s`" :aria-label="`Filter ${kind}s`"
+               spellcheck="false" @keydown.esc="filter = ''" />
+        <button v-if="filter" aria-label="Clear filter" @click="filter = ''"><X :size="13" /></button>
+      </div>
+
+      <div class="rows">
+        <Skeleton v-if="loading && !principals.length" :rows="7" />
+        <p v-else-if="!shown.length" class="none">
+          {{ filter ? `Nothing matching “${filter}”.` : `No ${kind}s visible to this account.` }}
+        </p>
+        <button v-for="[name, storage] in shown" :key="name" type="button"
+                :class="['row', { on: name === chosen }]" @click="chosen = name">
+          <component :is="kindIcon" :size="14" class="ico" />
+          <span class="ident nm" :title="name">{{ name }}</span>
+          <span v-if="storage === 'users_xml'" class="tag"
+                data-tip-left data-tip="Defined in users.xml, not editable by SQL">xml</span>
+        </button>
       </div>
 
       <form class="new" @submit.prevent="create">
-        <Field v-model="newName" :placeholder="`new ${kind} name`" mono />
+        <span class="eyebrow">New {{ kind }}</span>
+        <Field v-model="newName" :placeholder="`${kind} name`" :aria-label="`New ${kind} name`" mono />
         <Field v-if="kind === 'user'" v-model="newPassword" type="password"
-               placeholder="password" reveal />
+               placeholder="password" aria-label="Password" autocomplete="new-password" reveal />
         <Btn type="submit" variant="subtle" :disabled="!newName.trim()">
-          <template #icon>
-            <component :is="kind === 'user' ? UserPlus : ShieldPlus" :size="14" />
-          </template>
-          Create {{ kind }}
+          <template #icon><component :is="kind === 'user' ? UserPlus : ShieldPlus" :size="14" /></template>
+          Stage new {{ kind }}
         </Btn>
       </form>
     </aside>
 
     <section class="detail">
-      <p v-if="error" class="error">{{ error }}</p>
+      <State v-if="error" kind="error" :title="`Could not load ${kind}s`" :detail="error">
+        <template #actions><Btn size="sm" variant="primary" @click="load">Try again</Btn></template>
+      </State>
 
-      <p v-else-if="!chosen" class="empty">Pick a {{ kind }} to see what it can do.</p>
+      <State v-else-if="loading && !principals.length" kind="loading" :title="`Loading ${kind}s`" />
 
-      <template v-else>
+      <State v-else-if="!chosen" :title="`No ${kind} selected`"
+             :hint="`Pick a ${kind} on the left to see what it can do.`">
+        <template #icon><component :is="kindIcon" :size="20" /></template>
+      </State>
+
+      <div v-else class="sheet">
         <header>
-          <h2 class="ident">{{ chosen }}</h2>
-          <span v-if="current?.[2]" class="auth ident">{{ current[2] }}</span>
+          <span class="tile"><component :is="kindIcon" :size="20" /></span>
+          <div class="titles">
+            <h2 class="ident">{{ chosen }}</h2>
+            <p class="sub">
+              {{ kind === 'user' ? 'User' : 'Role' }}
+              <template v-if="current?.[2]"> · <span class="ident">{{ current[2] }}</span></template>
+            </p>
+          </div>
           <span class="spacer" />
           <Btn variant="danger" size="sm" :disabled="readonly" @click="drop">
             <template #icon><Trash2 :size="13" /></template>Drop {{ kind }}
@@ -167,69 +260,139 @@ defineExpose({ reload: () => { load(); showCreate() } })
         </header>
 
         <p v-if="readonly" class="warn">
-          Defined in users.xml. ClickHouse can show this account but cannot alter it
-          by SQL, so it has to be edited in the server config.
+          <Lock :size="14" />
+          <span>
+            Defined in users.xml. ClickHouse can show this account but cannot alter it
+            by SQL, so it has to be edited in the server config.
+          </span>
         </p>
 
         <section v-if="kind === 'user'" class="block">
-          <h3>Roles</h3>
+          <h3 class="eyebrow">Roles</h3>
           <div class="chips">
             <span v-for="r in directRoles" :key="r" class="chip ident">
               {{ r }}
-              <button :disabled="readonly" @click="detachRole(r)">&times;</button>
+              <button v-if="!readonly" :aria-label="`Revoke role ${r}`" @click="detachRole(r)">
+                <X :size="12" />
+              </button>
             </span>
-            <span v-if="!directRoles.length" class="empty">No roles granted.</span>
+            <span v-if="!directRoles.length" class="muted">No roles granted.</span>
           </div>
           <div v-if="!readonly" class="add">
-            <select v-model="addRole">
+            <select v-model="addRole" class="select" aria-label="Role to grant">
               <option value="">Grant a role&hellip;</option>
               <option v-for="r in grantableRoles" :key="r" :value="r">{{ r }}</option>
             </select>
-            <Btn size="sm" :disabled="!addRole" @click="attachRole">
+            <Btn :disabled="!addRole" @click="attachRole">
               <template #icon><Plus :size="13" /></template>Grant
             </Btn>
           </div>
         </section>
 
+        <section v-if="kind === 'user'" class="block">
+          <h3 class="eyebrow">Allowed hosts <span v-if="hostEntry" class="pending">staged</span></h3>
+          <div class="chips">
+            <span v-if="anyHost(hosts)" class="chip ident">Any host</span>
+            <template v-else>
+              <span v-for="h in hostList(hosts)" :key="h.kind + h.value" class="chip ident">
+                <small v-if="h.kind !== 'ip'">{{ h.kind }}</small>{{ h.value }}
+                <button v-if="!readonly" :aria-label="`Remove ${h.value}`" @click="removeHost(h)">
+                  <X :size="12" />
+                </button>
+              </span>
+              <span v-if="!hostList(hosts).length" class="lockout">
+                No host allowed. This user cannot connect from anywhere.
+              </span>
+            </template>
+          </div>
+          <template v-if="!readonly">
+            <form class="add" @submit.prevent="addHost">
+              <Field v-model="newHost" placeholder="192.168.1.5 or 10.0.0.0/8" mono
+                     :invalid="!!hostError" aria-label="IP address or subnet to allow" />
+              <Btn type="submit" :disabled="!newHost.trim()">
+                <template #icon><Plus :size="13" /></template>Allow
+              </Btn>
+              <Btn v-if="!anyHost(hosts)" variant="ghost" type="button"
+                   @click="setHosts(ANY_HOST)">Allow any host</Btn>
+            </form>
+            <p v-if="hostError" class="hint bad" role="alert">{{ hostError }}</p>
+            <p v-else class="hint">
+              {{ anyHost(hosts)
+                ? 'Allowing an address limits this user to the addresses listed.'
+                : 'Only these addresses can sign in as this user.' }}
+              ClickHouse sees the address of the machine that connects to it,
+              which for this console is the machine running it.
+            </p>
+          </template>
+        </section>
+
         <section class="block">
-          <h3>Grants</h3>
+          <h3 class="eyebrow">Grants</h3>
           <Grants :grantee="chosen" :grants="grants" :roles="inherited"
                   :tables="tables" :readonly="readonly" />
         </section>
 
         <section class="block">
-          <h3>Definition</h3>
-          <pre class="ddl">{{ ddl }}</pre>
+          <h3 class="eyebrow">
+            Definition
+            <Btn v-if="ddl" size="sm" icon variant="ghost" data-tip="Copy definition"
+                 aria-label="Copy definition" @click="copy(ddl, 'Definition copied')">
+              <template #icon><Copy :size="13" /></template>
+            </Btn>
+          </h3>
+          <p v-if="ddlError" class="ddl bad" role="alert">
+            <span>Could not load the definition: {{ ddlError }}</span>
+            <Btn size="sm" @click="showCreate">Try again</Btn>
+          </p>
+          <pre v-else class="ddl">{{ ddl || 'Loading…' }}</pre>
         </section>
-      </template>
+      </div>
     </section>
   </div>
 </template>
 
 <style scoped>
-.access { display: grid; grid-template-columns: 220px 1fr; height: 100%; min-height: 0; }
+.access { display: grid; grid-template-columns: 248px minmax(0, 1fr); height: 100%; min-height: 0; }
 
 .list {
   display: flex;
   flex-direction: column;
-  overflow: auto;
-  padding: var(--s2);
+  min-height: 0;
   border-right: 1px solid var(--border);
   background: var(--bg-panel);
 }
 
+.lhead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--s3) var(--s3) var(--s2);
+}
+
+.count {
+  padding: 0 6px;
+  background: var(--bg-active);
+  border-radius: var(--r-full);
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+}
+
+.searchbox { flex: none; margin: 0 var(--s2) var(--s2); }
+
+.rows { flex: 1; min-height: 0; overflow: auto; padding: 0 var(--s1) var(--s2); }
+
 .row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  width: 100%;
   height: var(--row-h);
   padding: 0 8px;
-  border-radius: var(--md-corner-xs);
-  cursor: pointer;
-}
-
-.row {
+  background: none;
+  border: 0;
+  border-radius: var(--r-xs);
   color: var(--text-secondary);
+  text-align: left;
   transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
 }
 
@@ -241,51 +404,72 @@ defineExpose({ reload: () => { load(); showCreate() } })
   box-shadow: inset 2px 0 0 var(--accent);
 }
 
+.row .ico { flex: none; color: var(--text-tertiary); }
+.row.on .ico { color: var(--accent); }
+.nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 .tag {
-  margin-left: auto;
-  padding: 1px 5px;
-  border: 1px solid var(--md-outline);
-  border-radius: var(--md-corner-xs);
-  color: var(--md-on-surface-variant);
+  flex: none;
+  padding: 0 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-xs);
+  color: var(--text-tertiary);
   font-size: 10px;
+  line-height: 1.5;
 }
+
+.none { margin: var(--s3) var(--s2); color: var(--text-tertiary); font-size: var(--fs-sm); }
 
 .new {
   display: flex;
+  flex: none;
   flex-direction: column;
   gap: var(--s2);
-  margin-top: auto;
-  padding-top: var(--s4);
-  border-top: 1px solid var(--border-subtle);
+  padding: var(--s3);
+  border-top: 1px solid var(--border);
 }
 
-.detail { overflow: auto; padding: var(--s6) var(--s8); }
+.detail { min-width: 0; overflow: auto; }
+.detail > .state { height: 100%; }
+.sheet { max-width: 1120px; padding: var(--s6) var(--s8) var(--s10); animation: fade-in var(--t) var(--ease); }
 
-header { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; }
-h2 { margin: 0; font-size: var(--fs-lg); font-weight: 600; }
-.auth { color: var(--md-on-surface-variant); font-size: 11px; }
+header { display: flex; align-items: center; gap: var(--s3); }
+
+.tile {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  background: var(--accent-subtle);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--r-md);
+  color: var(--accent);
+}
+
+.titles { min-width: 0; }
+h2 { margin: 0; overflow: hidden; font-size: var(--fs-lg); font-weight: 600; text-overflow: ellipsis; }
+.sub { margin: 1px 0 0; color: var(--text-tertiary); font-size: var(--fs-sm); }
 .spacer { flex: 1; }
 
 .warn {
-  margin: 10px 0;
+  display: flex;
+  gap: 9px;
+  max-width: 72ch;
+  margin: var(--s4) 0 0;
   padding: 9px 11px;
-  background: var(--md-surface-container);
-  border-left: 2px solid var(--md-outline);
-  color: var(--md-on-surface-variant);
-  font-size: 12px;
+  background: var(--warning-subtle);
+  border-radius: var(--r-sm);
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
   line-height: 1.55;
 }
 
-.block { margin-top: 26px; }
+.warn svg { flex: none; margin-top: 2px; color: var(--warning); }
 
-h3 {
-  margin: 0 0 10px;
-  color: var(--md-on-surface-variant);
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-}
+.block { margin-top: var(--s6); }
+.block h3 { display: flex; align-items: center; gap: 6px; min-height: 26px; margin-bottom: 6px; }
 
 .chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 
@@ -293,51 +477,63 @@ h3 {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  height: 24px;
-  padding: 0 4px 0 9px;
-  background: var(--md-tertiary-container);
-  border-radius: var(--md-corner-xs);
-  font-size: 12px;
+  height: 26px;
+  padding: 0 9px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text-primary);
 }
 
 .chip button {
+  display: flex;
+  margin-right: -5px;
+  padding: 3px;
   background: none;
   border: 0;
-  color: inherit;
-  font-size: 14px;
-  line-height: 1;
-  cursor: pointer;
+  border-radius: var(--r-xs);
+  color: var(--text-tertiary);
 }
 
-.add { display: flex; gap: 8px; margin-top: 10px; }
+.chip button:hover { background: var(--error-subtle); color: var(--error); }
+.chip small { margin-right: 2px; color: var(--text-tertiary); font-size: 10px; }
 
-.add select {
-  height: 28px;
-  padding: 0 8px;
-  background: var(--md-surface-container-high);
-  border: 1px solid var(--md-outline);
-  border-radius: var(--md-corner-xs);
-  font-size: 12px;
-}
+.add { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.add .field { width: 260px; }
+.add :deep(.box) { height: var(--control-h); }
+.add .select { min-width: 180px; }
+
+.muted { color: var(--text-tertiary); font-size: var(--fs-sm); }
+.pending { color: var(--accent-text); letter-spacing: 0; text-transform: none; }
+.lockout { color: var(--warning); font-size: var(--fs-sm); }
+.hint { max-width: 62ch; margin: 8px 0 0; color: var(--text-tertiary); font-size: var(--fs-sm); line-height: 1.55; }
+.hint.bad { color: var(--error); }
 
 .ddl {
   margin: 0;
   padding: 11px 13px;
-  background: var(--md-surface-container-low);
-  border: 1px solid var(--md-outline-variant);
-  border-radius: var(--md-corner-xs);
-  font: 400 12px/1.6 var(--font-mono);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-md);
+  color: var(--text-secondary);
+  font: 400 var(--fs-sm)/1.6 var(--font-mono);
   white-space: pre-wrap;
+  word-break: break-word;
 }
 
-.empty { color: var(--md-on-surface-variant); font-size: 13px; }
-
-.error {
-  padding: 10px 12px;
-  background: var(--md-error-container);
-  border-radius: var(--md-corner-xs);
-  font: 400 12px/1.5 var(--font-mono);
+.ddl.bad {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  border-color: var(--error-border);
+  background: var(--error-subtle);
+  color: var(--error);
 }
+.ddl.bad span { flex: 1; min-width: 0; }
 
-button:disabled { opacity: 0.45; cursor: not-allowed; }
+@media (max-width: 900px) {
+  .access { grid-template-columns: 200px minmax(0, 1fr); }
+  .sheet { padding: var(--s4); }
+  header { flex-wrap: wrap; }
+}
 </style>

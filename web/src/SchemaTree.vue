@@ -60,12 +60,23 @@ function toggleTable(db, table) {
 }
 
 function openMenu(e, db, table) {
-  menu.value = { x: Math.min(e.clientX, window.innerWidth - 210), y: e.clientY, db, table }
+  menu.value = {
+    x: Math.min(e.clientX, window.innerWidth - 210),
+    y: Math.min(e.clientY, window.innerHeight - (table ? 200 : 120)),
+    db, table,
+  }
 }
 
 const closeMenu = () => { menu.value = null }
-onMounted(() => document.addEventListener('click', closeMenu))
-onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
+const escMenu = (e) => { if (e.key === 'Escape') closeMenu() }
+onMounted(() => {
+  document.addEventListener('click', closeMenu)
+  document.addEventListener('keydown', escMenu)
+})
+onBeforeUnmount(() => {
+  document.removeEventListener('click', closeMenu)
+  document.removeEventListener('keydown', escMenu)
+})
 
 const act = (name) => {
   const { db, table } = menu.value
@@ -77,11 +88,11 @@ const act = (name) => {
 <template>
   <div class="tree">
     <div class="head">
-      <div class="search">
+      <div class="searchbox">
         <Search :size="14" />
         <input v-model="filter" placeholder="Filter schema" aria-label="Filter schema"
                spellcheck="false" @keydown.esc="filter = ''" />
-        <button v-if="filter" class="clear" aria-label="Clear filter" @click="filter = ''">
+        <button v-if="filter" aria-label="Clear filter" @click="filter = ''">
           <X :size="13" />
         </button>
       </div>
@@ -174,37 +185,7 @@ const act = (name) => {
   border-bottom: 1px solid var(--border-subtle);
 }
 
-.search {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  flex: 1;
-  min-width: 0;
-  height: var(--control-h);
-  padding: 0 6px 0 9px;
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  color: var(--text-tertiary);
-  transition: border-color var(--t-fast) var(--ease);
-}
-
-.search:focus-within { border-color: var(--accent); }
-
-.search input {
-  flex: 1;
-  min-width: 0;
-  background: none;
-  border: 0;
-  outline: none;
-  color: var(--text-primary);
-  font-size: var(--fs-sm);
-}
-
-.search input::placeholder { color: var(--text-disabled); }
-
-.clear { display: flex; padding: 3px; background: none; border: 0; border-radius: var(--r-xs); color: inherit; }
-.clear:hover { background: var(--bg-hover); color: var(--text-primary); }
+.searchbox { flex: 1; }
 
 .body { flex: 1; overflow: auto; padding: var(--s2) var(--s1) var(--s5); }
 

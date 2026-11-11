@@ -1,4 +1,4 @@
-import { ident } from './sql.js'
+import { ident, literal } from './sql.js'
 
 // The columns of the grants matrix. ClickHouse has 206 access types, but it
 // records the parent when you grant one - GRANT ALTER stores ALTER, not its
@@ -85,3 +85,39 @@ export const dropUserSQL = (name) => `DROP USER ${ident(name)}`
 // screen, or query_log.
 export const createUserSQL = (name) =>
   `CREATE USER ${ident(name)} IDENTIFIED WITH sha256_password BY {password:String}`
+
+// Where a user may connect from. system.users keeps it as four lists, here
+// { ip, names, regexp, like }. An ip of ::/0 is how ClickHouse stores "any".
+export const ANY_HOST = { ip: ['::/0'], names: [], regexp: [], like: [] }
+export const anyHost = (h) => h.ip.includes('::/0')
+
+export const hostList = (h) => [
+  ...h.ip.map((value) => ({ kind: 'ip', value })),
+  ...h.names.map((value) => ({ kind: 'names', value })),
+  ...h.regexp.map((value) => ({ kind: 'regexp', value })),
+  ...h.like.map((value) => ({ kind: 'like', value })),
+]
+
+const HOST_KEYWORD = { ip: 'IP', names: 'NAME', regexp: 'REGEXP', like: 'LIKE' }
+
+// ALTER USER ... HOST replaces the whole list rather than adding to it, so the
+// statement always spells out every entry that should remain. Sorted, so two
+// equal sets always produce the same statement.
+export function hostSQL(name, h) {
+  const entries = anyHost(h)
+    ? ['ANY']
+    : hostList(h).map(({ kind, value }) => `${HOST_KEYWORD[kind]} ${literal(value)}`).sort()
+  return `ALTER USER ${ident(name)} HOST ${entries.join(', ') || 'NONE'}`
+}
+
+// An address or subnet: IPv4 or IPv6, with an optional /prefix.
+// ponytail: IPv6 is checked for shape only; ClickHouse rejects the rest when
+// the statement is applied, and the ledger shows its error.
+export function validAddr(s) {
+  const [addr, prefix, more] = s.split('/')
+  if (more !== undefined || prefix === '') return false
+  const v4 = /^\d{1,3}(\.\d{1,3}){3}$/.test(addr) && addr.split('.').every((n) => Number(n) <= 255)
+  const v6 = /^[0-9a-f:]+(\.\d{1,3}){0,3}$/i.test(addr) && (addr.match(/:/g) || []).length >= 2
+  if (!v4 && !v6) return false
+  return prefix === undefined || (/^\d{1,3}$/.test(prefix) && Number(prefix) <= (v4 ? 32 : 128))
+}

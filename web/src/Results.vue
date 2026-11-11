@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
   ArrowDown, ArrowUp, ChevronsUpDown, Copy, Download, Maximize2, Minimize2, Rows3,
 } from 'lucide-vue-next'
@@ -68,7 +68,9 @@ onBeforeUnmount(endResize)
 
 /* --- cell menu ----------------------------------------------------------- */
 const openMenu = (e, row, value) => {
-  menu.value = { x: Math.min(e.clientX, innerWidth - 200), y: e.clientY, row, value }
+  menu.value = {
+    x: Math.min(e.clientX, innerWidth - 200), y: Math.min(e.clientY, innerHeight - 90), row, value,
+  }
 }
 
 const cellText = (v) => (v === null ? 'NULL' : String(v))
@@ -110,6 +112,14 @@ function toggleFull() {
   emit('fullscreen', full.value)
 }
 
+const onEsc = (e) => {
+  if (e.key !== 'Escape') return
+  if (menu.value) menu.value = null
+  else if (full.value) toggleFull()
+}
+onMounted(() => window.addEventListener('keydown', onEsc))
+onBeforeUnmount(() => window.removeEventListener('keydown', onEsc))
+
 /* --- footer statistics --------------------------------------------------- */
 const ms = (s) => (s < 1 ? `${Math.round(s * 1000)} ms` : `${s.toFixed(2)} s`)
 const int = (n) => Number(n).toLocaleString()
@@ -138,7 +148,7 @@ function bytes(n) {
           <button aria-label="Clear sort" @click="sort = null">&times;</button>
         </span>
         <span class="spacer" />
-        <Btn size="sm" variant="ghost" data-tip="Copy as TSV"
+        <Btn size="sm" icon variant="ghost" data-tip="Copy as TSV"
              @click="copy([meta.map(c => c.name).join('\t'), ...rows.map(r => r.map(cellText).join('\t'))].join('\n'), 'Result copied')">
           <template #icon><Copy :size="13" /></template>
         </Btn>

@@ -2,11 +2,11 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   Database, Users, Shield, FileLock2, ScrollText, Search, Play, FilePlus2,
-  Wand2, Eraser, RefreshCw, History as HistoryIcon, PanelLeft, LogOut, Table2,
+  Wand2, Eraser, RefreshCw, History as HistoryIcon, PanelLeft, LogOut, Table2, Sparkles,
 } from 'lucide-vue-next'
 import { logout, me } from './api'
 import { staged } from './ledger'
-import { pref, setPref } from './prefs'
+import { pref, setPref, modKey } from './prefs'
 import Explorer from './Explorer.vue'
 import Access from './Access.vue'
 import Ledger from './Ledger.vue'
@@ -38,8 +38,6 @@ watch(active, (v) => setPref('section', v))
 
 const WRITES = ['Users', 'Roles']
 const showLedger = computed(() => WRITES.includes(active.value) || staged.value.length > 0)
-const mac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
-const modKey = mac ? '⌘' : 'Ctrl'
 
 /* --- command palette ----------------------------------------------------- */
 const commands = computed(() => {
@@ -59,6 +57,9 @@ const commands = computed(() => {
       { id: 'refresh', group: 'Schema', label: 'Refresh schema', icon: RefreshCw, act: () => e.refreshSchema() },
       { id: 'side', group: 'View', label: 'Toggle sidebar', icon: PanelLeft, act: () => e.toggleSidebar() },
     )
+    if (props.session.assistant) {
+      out.push({ id: 'ai', group: 'View', label: 'Toggle assistant', icon: Sparkles, act: () => e.toggleAssistant() })
+    }
     for (const { db, table } of e.tableList()) {
       out.push({
         id: `t:${db}.${table}`, group: 'Tables', label: table, hint: db, icon: Table2,
@@ -130,7 +131,7 @@ async function signOut() {
     </header>
 
     <main class="body">
-      <Explorer v-if="active === 'Explorer'" :key="viewKey" ref="explorer" />
+      <Explorer v-if="active === 'Explorer'" :key="viewKey" ref="explorer" :assistant="session.assistant" />
       <Access v-else-if="active === 'Users'" :key="viewKey" ref="access" kind="user" />
       <Access v-else-if="active === 'Roles'" :key="viewKey" ref="access" kind="role" />
       <Policies v-else-if="active === 'Policies'" :key="viewKey" />
